@@ -18,7 +18,6 @@ import {
   ENGINE_REPLY_DELAY_MS,
   useEngineOpponent,
 } from "@/lib/engine/use-engine-opponent";
-import { getBrowserEngine } from "@/lib/engine/browser-engine";
 import { uciToMove } from "@/lib/uci-move";
 import {
   endgameOutcome,
