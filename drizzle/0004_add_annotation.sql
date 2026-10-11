@@ -1,0 +1,1 @@
+ALTER TABLE `line_moves` ADD `annotation` text;

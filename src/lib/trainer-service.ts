@@ -128,6 +128,8 @@ export interface TrainerService {
     parentNodeId: number | null,
     san: string,
   ): LineNode;
+  getAnnotation(lineId: number, nodeId: number): string | null;
+  setAnnotation(lineId: number, nodeId: number, text: string | null): void;
   deleteLine(lineId: number): void;
   close(): void;
 }
@@ -436,6 +438,31 @@ export function createTrainerService(dbPath: string): TrainerService {
         .returning()
         .get();
       return toLineNode(inserted);
+    },
+    getAnnotation(lineId: number, nodeId: number): string | null {
+      const row = db
+        .select({ annotation: lineMoves.annotation })
+        .from(lineMoves)
+        .where(and(eq(lineMoves.id, nodeId), eq(lineMoves.lineId, lineId)))
+        .get();
+      if (!row) {
+        throw new Error(
+          `Không tìm thấy node #${nodeId} trong Dòng khai cuộc #${lineId}.`,
+        );
+      }
+      return row.annotation;
+    },
+    setAnnotation(lineId: number, nodeId: number, text: string | null): void {
+      const result = db
+        .update(lineMoves)
+        .set({ annotation: text })
+        .where(and(eq(lineMoves.id, nodeId), eq(lineMoves.lineId, lineId)))
+        .run();
+      if (result.changes === 0) {
+        throw new Error(
+          `Không tìm thấy node #${nodeId} trong Dòng khai cuộc #${lineId}.`,
+        );
+      }
     },
     deleteLine(lineId: number): void {
       db.transaction((tx) => {

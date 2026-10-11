@@ -29,6 +29,13 @@
       "when": 1791733403249,
       "tag": "0003_puzzle_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791733504238,
+      "tag": "0004_add_annotation",
+      "breakpoints": true
     }
   ]
 }
