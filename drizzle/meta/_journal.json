@@ -43,6 +43,13 @@
       "when": 1791735154214,
       "tag": "0005_drill_schedule",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791735200000,
+      "tag": "0006_games",
+      "breakpoints": true
     }
   ]
 }

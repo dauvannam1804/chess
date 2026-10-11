@@ -22,6 +22,7 @@ import { Chess } from "chess.js";
 import { Pgn, type PgnMove } from "cm-pgn";
 import {
   drillSchedule,
+  games,
   lineMoves,
   positions,
   puzzleAttempts,
@@ -30,6 +31,11 @@ import {
   repertoireLines,
 } from "./schema";
 import { parsePuzzleCsv, type ParsedPuzzle } from "./puzzle-csv";
+import {
+  MAX_ENGINE_STRENGTH,
+  MIN_ENGINE_STRENGTH,
+} from "./engine/strength";
+import { GAME_RESULTS, type GameResult } from "./play/game-result";
 
 export const STANDARD_START_FEN =
   "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -75,6 +81,33 @@ export type PuzzleAttempt = {
 };
 
 export type ThemeStat = { theme: string; solved: number; attempted: number };
+
+export type { GameResult };
+
+export type SaveGameInput = {
+  pgn: string;
+  result: GameResult;
+  userColor: string;
+  engineStrength: number;
+  finalFen: string;
+};
+
+export type SavedGame = {
+  id: number;
+  pgn: string;
+  result: GameResult;
+  userColor: string;
+  engineStrength: number;
+  finalFen: string;
+  playedAt: string;
+};
+
+export type GamePage = { total: number; items: SavedGame[] };
+
+export type ListGamesOptions = {
+  limit?: number;
+  offset?: number;
+};
 
 export type RandomBatchFilter = {
   theme?: string;
@@ -187,6 +220,9 @@ export interface TrainerService {
   recordAttempt(puzzleId: string, solved: boolean): PuzzleAttempt;
   getThemeStats(): ThemeStat[];
   getRandomBatch(filter?: RandomBatchFilter, n?: number): StoredPuzzle[];
+  saveGame(input: SaveGameInput): SavedGame;
+  listGames(options?: ListGamesOptions): GamePage;
+  getGame(id: number): SavedGame | null;
   createLineFromPgn(name: string, pgnText: string): RepertoireLine;
   listLines(): RepertoireLine[];
   getLineTree(lineId: number): LineNode | null;
@@ -706,6 +742,40 @@ export function createTrainerService(dbPath: string): TrainerService {
       }
       return { due, mastered, learning };
     },
+    saveGame(input: SaveGameInput): SavedGame {
+      const result = assertGameResult(input.result);
+      const userColor = assertUserColor(input.userColor);
+      const engineStrength = assertEngineStrength(input.engineStrength);
+      const pgn = assertNonEmpty(input.pgn, "PGN");
+      assertValidFen(input.finalFen);
+      return db
+        .insert(games)
+        .values({ pgn, result, userColor, engineStrength, finalFen: input.finalFen })
+        .returning()
+        .get();
+    },
+    listGames(options: ListGamesOptions = {}): GamePage {
+      const { limit = 50, offset = 0 } = options;
+      const total =
+        db.select({ value: count() }).from(games).get()?.value ?? 0;
+      const items = db
+        .select()
+        .from(games)
+        .orderBy(desc(games.playedAt), desc(games.id))
+        .limit(Math.max(0, Math.floor(limit)))
+        .offset(Math.max(0, Math.floor(offset)))
+        .all();
+      return { total, items };
+    },
+    getGame(id: number): SavedGame | null {
+      return (
+        db
+          .select()
+          .from(games)
+          .where(eq(games.id, id))
+          .get() ?? null
+      );
+    },
     close(): void {
       sqlite.close();
     },
@@ -786,6 +856,42 @@ function assertValidFen(fen: string): void {
   } catch (cause) {
     throw new Error(`FEN không hợp lệ: ${fen}`, { cause });
   }
+}
+
+function assertGameResult(result: string): GameResult {
+  if (!(GAME_RESULTS as readonly string[]).includes(result)) {
+    throw new Error(
+      `Result không hợp lệ: "${result}" — phải là ${GAME_RESULTS.join(" | ")}.`,
+    );
+  }
+  return result as GameResult;
+}
+
+function assertUserColor(userColor: string): string {
+  if (userColor !== "w" && userColor !== "b") {
+    throw new Error(`Màu quân của bạn không hợp lệ: "${userColor}" — phải là 'w' | 'b'.`);
+  }
+  return userColor;
+}
+
+function assertEngineStrength(engineStrength: number): number {
+  if (
+    !Number.isInteger(engineStrength) ||
+    engineStrength < MIN_ENGINE_STRENGTH ||
+    engineStrength > MAX_ENGINE_STRENGTH
+  ) {
+    throw new Error(
+      `Độ mạnh engine phải là số nguyên ${MIN_ENGINE_STRENGTH}..${MAX_ENGINE_STRENGTH}, nhận: ${engineStrength}`,
+    );
+  }
+  return engineStrength;
+}
+
+function assertNonEmpty(value: string, label: string): string {
+  if (value.trim().length === 0) {
+    throw new Error(`${label} không được để trống.`);
+  }
+  return value;
 }
 
 function parsePgnOrThrow(pgnText: string): Pgn {

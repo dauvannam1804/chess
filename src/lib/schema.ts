@@ -8,6 +8,7 @@ import {
   text,
   type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
+import type { GameResult } from "./play/game-result";
 
 export const positions = sqliteTable("positions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -105,6 +106,22 @@ export const drillSchedule = sqliteTable(
   (table) => [
     check("drill_schedule_box_range", sql`${table.box} between 1 and 4`),
   ],
+);
+
+export const games = sqliteTable(
+  "games",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    pgn: text("pgn").notNull(),
+    result: text("result").$type<GameResult>().notNull(),
+    userColor: text("user_color").notNull(),
+    engineStrength: integer("engine_strength").notNull(),
+    finalFen: text("final_fen").notNull(),
+    playedAt: text("played_at")
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+  },
+  (table) => [index("games_played_at_idx").on(table.playedAt)],
 );
 
 export const lineMoves = sqliteTable("line_moves", {

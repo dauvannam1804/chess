@@ -2,6 +2,10 @@
 
 import { getTrainerService } from "@/lib/trainer-service-server";
 import { getExplainer, type DraftAnnotationInput } from "@/lib/explainer";
+import type {
+  ListGamesOptions,
+  SaveGameInput,
+} from "@/lib/trainer-service";
 
 export async function savePositionAction(fen: string, name?: string) {
   return getTrainerService().savePosition(fen, name);
@@ -85,4 +89,16 @@ export async function answerDrillItemAction(nodeId: number, correct: boolean) {
 
 export async function getDrillSummaryAction() {
   return getTrainerService().getDrillSummary();
+}
+
+export async function saveGameAction(input: SaveGameInput) {
+  return getTrainerService().saveGame(input);
+}
+
+export async function listGamesAction(options?: ListGamesOptions) {
+  return getTrainerService().listGames(options);
+}
+
+export async function getGameAction(id: number) {
+  return getTrainerService().getGame(id);
 }
