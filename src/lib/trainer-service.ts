@@ -394,6 +394,14 @@ function toLineNode(row: typeof lineMoves.$inferSelect): LineNode {
   };
 }
 
+type MoveLineNode = LineNode & { san: string; uci: string; fenAfter: string };
+
+function assertMoveNode(node: LineNode): asserts node is MoveLineNode {
+  if (node.san === null || node.uci === null || node.fenAfter === null) {
+    throw new Error("Node nước đi thiếu san/uci/fenAfter (dữ liệu DB hỏng).");
+  }
+}
+
 /**
  * Dựng lại cây cm-pgn từ cây DB để render ra PGN.
  * Chiều ngược lại của persistMoveArray: con đầu của node X là nước chính,
@@ -408,6 +416,7 @@ function attachChildrenToHistory(
 ): void {
   if (children.length === 0) return;
   const [first, ...extras] = children;
+  assertMoveNode(first);
 
   const cmFirst = history.addMove(first.san, cmParent);
   cmFirst.ply = parentPly + 1;
@@ -415,6 +424,7 @@ function attachChildrenToHistory(
   attachChildrenToHistory(history, first.children, cmFirst, parentPly + 1);
 
   for (const extra of extras) {
+    assertMoveNode(extra);
     const variationArray: PgnMove[] = [];
     cmFirst.variations.push(variationArray);
     const cmExtra: PgnMove = {
@@ -422,8 +432,7 @@ function attachChildrenToHistory(
       uci: extra.uci,
       from: extra.uci.slice(0, 2),
       to: extra.uci.slice(2, 4),
-      promotion:
-        extra.uci.length > 4 ? extra.uci.slice(4) : undefined,
+      promotion: extra.uci.length > 4 ? extra.uci.slice(4) : undefined,
       fen: extra.fenAfter,
       ply: parentPly + 1,
       previous: cmParent,

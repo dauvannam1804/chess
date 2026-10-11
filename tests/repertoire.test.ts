@@ -131,8 +131,8 @@ describe("TrainerService — Repertoire Line", () => {
           ),
         );
       };
-      expect(stripIds(service.getLineTree(reimported.id))).toEqual(
-        stripIds(service.getLineTree(line.id)),
+      expect(stripIds(service.getLineTree(reimported.id)!)).toEqual(
+        stripIds(service.getLineTree(line.id)!),
       );
     }
   });
