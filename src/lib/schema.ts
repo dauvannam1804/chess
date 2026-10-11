@@ -80,4 +80,5 @@ export const lineMoves = sqliteTable("line_moves", {
   commentsJson: text("comments_json").notNull().default("[]"),
   startingCommentsJson: text("starting_comments_json").notNull().default("[]"),
   nagsJson: text("nags_json").notNull().default("[]"),
+  annotation: text("annotation"),
 });

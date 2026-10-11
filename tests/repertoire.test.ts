@@ -213,3 +213,109 @@ describe("TrainerService — Repertoire Line", () => {
     expect(service.getLineTree(line.id)).toBeNull();
   });
 });
+
+describe("TrainerService — Annotation (Giải thích)", () => {
+  let dir: string;
+  let dbPath: string;
+  let service: TrainerService;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "chess-annotation-"));
+    dbPath = join(dir, "chess.db");
+    service = createTrainerService(dbPath);
+  });
+
+  afterEach(() => {
+    service.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** Node e5 của Italian PGN — mang PGN comment "king pawn". */
+  function e5NodeIdOf(lineId: number): number {
+    const tree = service.getLineTree(lineId);
+    const e5 = tree?.children[0]?.children[0];
+    if (!e5?.id) throw new Error("fixture hỏng: không tìm thấy node e5");
+    return e5.id;
+  }
+
+  it("getAnnotation trả về null lúc đầu dù node có PGN comment", () => {
+    const line = service.createLineFromPgn("Ý", ITALIAN_PGN);
+    const e5Id = e5NodeIdOf(line.id);
+
+    expect(service.getAnnotation(line.id, e5Id)).toBeNull();
+  });
+
+  it("setAnnotation lưu ngay và getAnnotation đọc lại đúng", () => {
+    const line = service.createLineFromPgn("Ý", ITALIAN_PGN);
+    const e5Id = e5NodeIdOf(line.id);
+
+    service.setAnnotation(line.id, e5Id, "Chiếm trung tâm, mở đường cho Tượng C4.");
+
+    expect(service.getAnnotation(line.id, e5Id)).toBe(
+      "Chiếm trung tâm, mở đường cho Tượng C4.",
+    );
+  });
+
+  it("setAnnotation(null) xóa giải thích", () => {
+    const line = service.createLineFromPgn("Ý", ITALIAN_PGN);
+    const e5Id = e5NodeIdOf(line.id);
+    service.setAnnotation(line.id, e5Id, "bản nháp");
+
+    service.setAnnotation(line.id, e5Id, null);
+
+    expect(service.getAnnotation(line.id, e5Id)).toBeNull();
+  });
+
+  it("annotation còn nguyên sau khi mở lại service (persist vĩnh viễn)", () => {
+    const line = service.createLineFromPgn("Ý", ITALIAN_PGN);
+    const e5Id = e5NodeIdOf(line.id);
+    service.setAnnotation(line.id, e5Id, "Nước này giữpawn để phản e4.");
+
+    service.close();
+    const reopened = createTrainerService(dbPath);
+    try {
+      expect(reopened.getAnnotation(line.id, e5Id)).toBe(
+        "Nước này giữpawn để phản e4.",
+      );
+    } finally {
+      reopened.close();
+    }
+  });
+
+  it("annotation riêng biệt theo từng node của cùng line", () => {
+    const line = service.createLineFromPgn("Ý", ITALIAN_PGN);
+    const tree = service.getLineTree(line.id);
+    const e4Id = tree?.children[0]?.id;
+    const e5Id = e5NodeIdOf(line.id);
+    if (!e4Id) throw new Error("fixture hỏng: không tìm thấy node e4");
+
+    service.setAnnotation(line.id, e4Id, "Nước của tôi.");
+    service.setAnnotation(line.id, e5Id, "Nước của đối phương.");
+
+    expect(service.getAnnotation(line.id, e4Id)).toBe("Nước của tôi.");
+    expect(service.getAnnotation(line.id, e5Id)).toBe("Nước của đối phương.");
+  });
+
+  it("từ chối node không thuộc line hoặc không tồn tại", () => {
+    const line = service.createLineFromPgn("Ý", ITALIAN_PGN);
+    const e5Id = e5NodeIdOf(line.id);
+    service.setAnnotation(line.id, e5Id, "abc");
+
+    expect(() => service.setAnnotation(999, e5Id, "x")).toThrowError(
+      /không tìm thấy/i,
+    );
+    expect(() => service.setAnnotation(line.id, 424242, "x")).toThrowError(
+      /không tìm thấy/i,
+    );
+    expect(() => service.getAnnotation(999, e5Id)).toThrowError(
+      /không tìm thấy/i,
+    );
+    // Node thử ở line khác của cùng DB cũng bị từ chối
+    const other = service.createLineFromPgn("Khác", "1. d4 d5");
+    const treeOther = service.getLineTree(other.id);
+    expect(() =>
+      service.getAnnotation(line.id, treeOther?.children[0]?.id ?? 0),
+    ).toThrowError(/không tìm thấy/i);
+    expect(service.getAnnotation(line.id, e5Id)).toBe("abc");
+  });
+});

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { Chessboard } from "react-chessboard";
 import { addBranchAndMoveAction, exportLinePgnAction } from "@/app/actions";
+import { AnnotationPanel } from "@/components/annotation-panel";
 import type { LineNode, RepertoireLine } from "@/lib/trainer-service";
 
 function findNode(node: LineNode, id: number | null): LineNode | null {
@@ -14,6 +15,16 @@ function findNode(node: LineNode, id: number | null): LineNode | null {
     if (found) return found;
   }
   return null;
+}
+
+/** Đường đi từ gốc tới node (gồm cả hai đầu) — suy fenBefore + chuỗi nước. */
+function pathToNode(node: LineNode, id: number | null): LineNode[] {
+  if (node.id === id) return [node];
+  for (const child of node.children) {
+    const subPath = pathToNode(child, id);
+    if (subPath.length > 0) return [node, ...subPath];
+  }
+  return [];
 }
 
 /** Nhãn số nước kiểu PGN ("1." trắng, "1..." đen) suy từ FEN sau nước. */
@@ -114,9 +125,11 @@ function MoveTreeNode({
 export function LineWorkbench({
   line,
   tree,
+  explainerAvailable,
 }: {
   line: RepertoireLine;
   tree: LineNode;
+  explainerAvailable: boolean;
 }) {
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -127,6 +140,10 @@ export function LineWorkbench({
   const selectedNode = useMemo(
     () => findNode(tree, selectedId) ?? tree,
     [tree, selectedId],
+  );
+  const selectedPath = useMemo(
+    () => pathToNode(tree, selectedNode.id),
+    [tree, selectedNode],
   );
   const boardFen = selectedNode.fenAfter ?? line.startFen;
 
@@ -290,6 +307,33 @@ export function LineWorkbench({
             </ul>
           )}
         </div>
+
+        {selectedNode.id !== null && (
+          <AnnotationPanel
+            key={selectedNode.id}
+            lineId={line.id}
+            nodeId={selectedNode.id}
+            lineName={line.name}
+            moveSan={selectedNode.san ?? ""}
+            fenBefore={
+              selectedPath.length > 1
+                ? (selectedPath[selectedPath.length - 2].fenAfter ??
+                  line.startFen)
+                : line.startFen
+            }
+            fenAfter={selectedNode.fenAfter ?? line.startFen}
+            movesSoFar={selectedPath
+              .slice(1)
+              .map((node) => node.san)
+              .filter((san): san is string => san !== null)}
+            isUserMove={selectedNode.isUserMove}
+            pgnComments={[
+              ...selectedNode.startingComments,
+              ...selectedNode.comments,
+            ]}
+            explainerAvailable={explainerAvailable}
+          />
+        )}
 
         <div className="rounded-lg border border-stone-300 bg-white p-4">
           <h2 className="font-semibold">Xuất PGN</h2>

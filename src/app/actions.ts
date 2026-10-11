@@ -1,6 +1,7 @@
 "use server";
 
 import { getTrainerService } from "@/lib/trainer-service-server";
+import { getExplainer, type DraftAnnotationInput } from "@/lib/explainer";
 
 export async function savePositionAction(fen: string, name?: string) {
   return getTrainerService().savePosition(fen, name);
@@ -36,4 +37,21 @@ export async function deleteLineAction(lineId: number) {
 
 export async function exportLinePgnAction(lineId: number) {
   return getTrainerService().exportLinePgn(lineId);
+}
+
+export async function getAnnotationAction(lineId: number, nodeId: number) {
+  return getTrainerService().getAnnotation(lineId, nodeId);
+}
+
+export async function setAnnotationAction(
+  lineId: number,
+  nodeId: number,
+  text: string | null,
+) {
+  getTrainerService().setAnnotation(lineId, nodeId, text);
+}
+
+/** Nháp từ Explainer — chỉ là dữ liệu; persist chỉ khi người dùng bấm lưu. */
+export async function draftAnnotationAction(input: DraftAnnotationInput) {
+  return getExplainer().draftAnnotation(input);
 }

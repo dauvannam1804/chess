@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LineWorkbench } from "@/components/line-workbench";
+import { hasExplainerConfigured } from "@/lib/explainer";
 import { getTrainerService } from "@/lib/trainer-service-server";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +31,11 @@ export default async function LineDetailPage({
       <p className="mt-1 text-sm text-stone-500">
         {line.userColor === "w" ? "Khai cuộc bên Trắng" : "Khai cuộc bên Đen"}
       </p>
-      <LineWorkbench line={line} tree={tree} />
+      <LineWorkbench
+        line={line}
+        tree={tree}
+        explainerAvailable={hasExplainerConfigured()}
+      />
     </section>
   );
 }
