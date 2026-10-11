@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ImportPgnForm } from "@/components/import-pgn-form";
+import { IMPORT_ENGINE_STRENGTH } from "@/lib/review/pgn-import";
 import { getTrainerService } from "@/lib/trainer-service-server";
 
 export const dynamic = "force-dynamic";
@@ -48,7 +49,10 @@ export default function XemLaiVanPage() {
                     Bạn cầm {game.userColor === "w" ? "Trắng" : "Đen"}
                   </span>
                   <span className="text-stone-500">
-                    · {game.engineStrength === 0 ? "import" : `cấp ${game.engineStrength}`}
+                    ·{" "}
+                    {game.engineStrength === IMPORT_ENGINE_STRENGTH
+                      ? "import"
+                      : `cấp ${game.engineStrength}`}
                   </span>
                   <span
                     className={
