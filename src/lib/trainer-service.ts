@@ -52,6 +52,10 @@ import {
 import { parsePuzzleCsv, type ParsedPuzzle } from "./puzzle-csv";
 import { uciToMove } from "./uci-move";
 import { STANDARD_START_FEN } from "./chess-constants";
+import {
+  isLineMastered,
+  type LineMastery,
+} from "./line-mastery";
 import type { MoveFlag } from "./review/flag-mistakes";
 import {
   MAX_ENGINE_STRENGTH,
@@ -59,7 +63,7 @@ import {
 } from "./engine/strength";
 import { GAME_RESULTS, type GameResult } from "./play/game-result";
 
-export { STANDARD_START_FEN };
+export { STANDARD_START_FEN, isLineMastered, type LineMastery };
 
 export type SavedPosition = {
   id: number;
@@ -217,25 +221,6 @@ export type DrillScheduleState = {
 };
 
 export type DrillSummary = { due: number; mastered: number; learning: number };
-
-/**
- * Mức thuộc của một Dòng khai cuộc (US-21) suy từ node con: line "Thuộc"
- * khi TOÀN BỘ node user-move của nó đã Mastered (xem `isLineMastered`).
- */
-export type LineMastery = {
-  lineId: number;
-  /** Tổng số node user-move trong line. */
-  userMoveCount: number;
-  /** Số node user-move đã Mastered. */
-  masteredCount: number;
-};
-
-/** Line "Thuộc": có ít nhất một node user-move và tất cả đã Mastered. */
-export function isLineMastered(mastery: LineMastery): boolean {
-  return (
-    mastery.userMoveCount > 0 && mastery.masteredCount === mastery.userMoveCount
-  );
-}
 
 export type { EndgameGoal, EndgameSource, EndgameUserColor };
 

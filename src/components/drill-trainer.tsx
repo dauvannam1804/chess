@@ -12,13 +12,8 @@ import {
 } from "@/app/actions";
 import { FeedbackBanner } from "@/components/feedback-banner";
 import type { Feedback } from "@/lib/feedback";
-import type {
-  DrillItem,
-  DrillSummary,
-  LineMastery,
-  LineNode,
-} from "@/lib/trainer-service";
-import { isLineMastered } from "@/lib/trainer-service";
+import { isLineMastered, type LineMastery } from "@/lib/line-mastery";
+import type { DrillItem, DrillSummary, LineNode } from "@/lib/trainer-service";
 
 type Phase = "idle" | "running" | "done";
 
