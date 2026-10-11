@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   primaryKey,
@@ -78,6 +79,33 @@ export const repertoireLines = sqliteTable("repertoire_lines", {
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
 });
+
+/**
+ * Lịch SRS Leitner của Drill (TT-07). Tạo row LƯỜI: lần đầu một node
+ * drillable (is_user_move = 1) được trả lời mới có lịch.
+ * `node_id` là node NƯỚC CỦA NGƯỜI DÙNG; thế cờ để luyện là FEN SAU node cha
+ * (hoặc start_fen nếu node cha là root) — xem getDrillQueue.
+ */
+export const drillSchedule = sqliteTable(
+  "drill_schedule",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    nodeId: integer("node_id")
+      .notNull()
+      .unique()
+      .references(() => lineMoves.id, { onDelete: "cascade" }),
+    lineId: integer("line_id")
+      .notNull()
+      .references(() => repertoireLines.id, { onDelete: "cascade" }),
+    box: integer("box").notNull().default(1),
+    dueAt: integer("due_at", { mode: "timestamp" }).notNull(),
+    masteredAt: integer("mastered_at", { mode: "timestamp" }),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    check("drill_schedule_box_range", sql`${table.box} between 1 and 4`),
+  ],
+);
 
 export const lineMoves = sqliteTable("line_moves", {
   id: integer("id").primaryKey({ autoIncrement: true }),

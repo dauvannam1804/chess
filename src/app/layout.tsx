@@ -12,6 +12,7 @@ const navItems = [
   { href: "/", label: "Sân chơi", en: "Playground" },
   { href: "/puzzle", label: "Puzzle", en: "Puzzle" },
   { href: "/khai-cuoc", label: "Khai cuộc", en: "Repertoire" },
+  { href: "/drill", label: "Ôn tập", en: "Drill" },
   { href: "/choi-voi-engine", label: "Chơi với Engine", en: "Play vs Engine" },
   { href: "/xem-lai-van", label: "Xem lại ván", en: "Game Review" },
   { href: "/tan-cuoc", label: "Tàn cuộc", en: "Endgame" },
