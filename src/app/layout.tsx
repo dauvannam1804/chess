@@ -50,8 +50,22 @@ export default function RootLayout({
         </header>
         <main className="mx-auto max-w-5xl px-4 py-6">{children}</main>
         <footer className="mx-auto max-w-5xl px-4 pb-8 text-xs text-stone-400">
-          Ứng dụng chạy local — dữ liệu nằm trong file SQLite trên máy bạn
-          (ADR-0001).
+          <p>
+            Ứng dụng chạy local — dữ liệu nằm trong file SQLite trên máy bạn
+            (ADR-0001).
+          </p>
+          <p className="mt-1">
+            Nguồn puzzle:{" "}
+            <a
+              href="https://database.lichess.org/#puzzles"
+              target="_blank"
+              rel="noreferrer"
+              className="underline hover:text-stone-600"
+            >
+              Lichess puzzle database (CC0)
+            </a>{" "}
+            (ADR-0002).
+          </p>
         </footer>
       </body>
     </html>

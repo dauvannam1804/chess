@@ -53,6 +53,21 @@ export const puzzleThemes = sqliteTable(
   ],
 );
 
+export const puzzleAttempts = sqliteTable(
+  "puzzle_attempts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    puzzleId: text("puzzle_id")
+      .notNull()
+      .references(() => puzzles.puzzleId, { onDelete: "cascade" }),
+    attemptedAt: text("attempted_at")
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    solved: integer("solved", { mode: "boolean" }).notNull(),
+  },
+  (table) => [index("puzzle_attempts_puzzle_id_idx").on(table.puzzleId)],
+);
+
 export const repertoireLines = sqliteTable("repertoire_lines", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),

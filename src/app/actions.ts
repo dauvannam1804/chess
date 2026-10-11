@@ -37,3 +37,22 @@ export async function deleteLineAction(lineId: number) {
 export async function exportLinePgnAction(lineId: number) {
   return getTrainerService().exportLinePgn(lineId);
 }
+
+export async function countByThemeAction() {
+  return getTrainerService().countByTheme();
+}
+
+export async function getRandomBatchAction(
+  filter: { theme?: string; ratingMin?: number; ratingMax?: number },
+  n: number,
+) {
+  return getTrainerService().getRandomBatch(filter, n);
+}
+
+export async function recordAttemptAction(puzzleId: string, solved: boolean) {
+  return getTrainerService().recordAttempt(puzzleId, solved);
+}
+
+export async function getThemeStatsAction() {
+  return getTrainerService().getThemeStats();
+}

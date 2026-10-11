@@ -21,6 +21,7 @@ import { Pgn, type PgnMove } from "cm-pgn";
 import {
   lineMoves,
   positions,
+  puzzleAttempts,
   puzzleThemes,
   puzzles,
   repertoireLines,
@@ -63,6 +64,21 @@ export type PuzzleFilter = {
 
 export type PagedPuzzles = { total: number; items: StoredPuzzle[] };
 
+export type PuzzleAttempt = {
+  id: number;
+  puzzleId: string;
+  attemptedAt: string;
+  solved: boolean;
+};
+
+export type ThemeStat = { theme: string; solved: number; attempted: number };
+
+export type RandomBatchFilter = {
+  theme?: string;
+  ratingMin?: number;
+  ratingMax?: number;
+};
+
 export type PuzzleCsvSource = string | Readable | AsyncIterable<string>;
 
 export type ImportPuzzlesOptions = {
@@ -100,6 +116,9 @@ export interface TrainerService {
   ): Promise<number>;
   countByTheme(): ThemeCount[];
   listPuzzles(filter?: PuzzleFilter): PagedPuzzles;
+  recordAttempt(puzzleId: string, solved: boolean): PuzzleAttempt;
+  getThemeStats(): ThemeStat[];
+  getRandomBatch(filter?: RandomBatchFilter, n?: number): StoredPuzzle[];
   createLineFromPgn(name: string, pgnText: string): RepertoireLine;
   listLines(): RepertoireLine[];
   getLineTree(lineId: number): LineNode | null;
@@ -189,29 +208,7 @@ export function createTrainerService(dbPath: string): TrainerService {
         limit = 50,
         offset = 0,
       } = filter;
-      const conditions = [];
-      if (theme !== undefined) {
-        conditions.push(
-          inArray(
-            puzzles.puzzleId,
-            db
-              .select({ id: puzzleThemes.puzzleId })
-              .from(puzzleThemes)
-              .where(eq(puzzleThemes.theme, theme)),
-          ),
-        );
-      }
-      if (ratingMin !== undefined) {
-        conditions.push(gte(puzzles.rating, ratingMin));
-      }
-      if (ratingMax !== undefined) {
-        conditions.push(lte(puzzles.rating, ratingMax));
-      }
-      const where = conditions.length
-        ? conditions.length === 1
-          ? conditions[0]
-          : and(...conditions)
-        : undefined;
+      const where = puzzleFilterWhere(db, { theme, ratingMin, ratingMax });
       const total =
         db.select({ value: count() }).from(puzzles).where(where).get()?.value ??
         0;
@@ -224,6 +221,49 @@ export function createTrainerService(dbPath: string): TrainerService {
         .offset(offset)
         .all();
       return { total, items };
+    },
+    recordAttempt(puzzleId: string, solved: boolean): PuzzleAttempt {
+      const puzzle = db
+        .select({ puzzleId: puzzles.puzzleId })
+        .from(puzzles)
+        .where(eq(puzzles.puzzleId, puzzleId))
+        .get();
+      if (!puzzle) {
+        throw new Error(`Puzzle "${puzzleId}" không tồn tại trong database.`);
+      }
+      return db
+        .insert(puzzleAttempts)
+        .values({ puzzleId, solved })
+        .returning()
+        .get();
+    },
+    getThemeStats(): ThemeStat[] {
+      const rows = db
+        .select({
+          theme: puzzleThemes.theme,
+          solved: sql<string>`SUM(CASE WHEN ${puzzleAttempts.solved} THEN 1 ELSE 0 END)`,
+          attempted: count(),
+        })
+        .from(puzzleAttempts)
+        .innerJoin(puzzleThemes, eq(puzzleAttempts.puzzleId, puzzleThemes.puzzleId))
+        .groupBy(puzzleThemes.theme)
+        .orderBy(desc(count()), asc(puzzleThemes.theme))
+        .all();
+      return rows.map((row) => ({
+        theme: row.theme,
+        solved: Number(row.solved ?? 0),
+        attempted: Number(row.attempted),
+      }));
+    },
+    getRandomBatch(filter: RandomBatchFilter = {}, n = 10): StoredPuzzle[] {
+      const where = puzzleFilterWhere(db, filter);
+      return db
+        .select()
+        .from(puzzles)
+        .where(where)
+        .orderBy(sql`RANDOM()`)
+        .limit(Math.max(0, Math.floor(n)))
+        .all();
     },
     createLineFromPgn(name: string, pgnText: string): RepertoireLine {
       const parsed = parsePgnOrThrow(pgnText);
@@ -410,6 +450,37 @@ export function createTrainerService(dbPath: string): TrainerService {
 }
 
 type DrizzleDb = ReturnType<typeof drizzle>;
+
+/** Mệnh đề WHERE dùng chung cho listPuzzles / getRandomBatch. */
+function puzzleFilterWhere(
+  db: DrizzleDb,
+  filter: {
+    theme?: string;
+    ratingMin?: number;
+    ratingMax?: number;
+  },
+) {
+  const conditions = [];
+  if (filter.theme !== undefined) {
+    conditions.push(
+      inArray(
+        puzzles.puzzleId,
+        db
+          .select({ id: puzzleThemes.puzzleId })
+          .from(puzzleThemes)
+          .where(eq(puzzleThemes.theme, filter.theme)),
+      ),
+    );
+  }
+  if (filter.ratingMin !== undefined) {
+    conditions.push(gte(puzzles.rating, filter.ratingMin));
+  }
+  if (filter.ratingMax !== undefined) {
+    conditions.push(lte(puzzles.rating, filter.ratingMax));
+  }
+  if (conditions.length === 0) return undefined;
+  return conditions.length === 1 ? conditions[0] : and(...conditions);
+}
 
 function insertPuzzleBatch(db: DrizzleDb, batch: ParsedPuzzle[]): void {
   db.insert(puzzles)
