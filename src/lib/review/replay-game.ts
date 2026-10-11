@@ -1,4 +1,5 @@
 import { Chess } from "chess.js";
+import { STANDARD_START_FEN } from "../chess-constants";
 
 /** Một bước trong ván: thế cờ TRƯỚC nước `san` (ply 0-based từ đầu ván). */
 export type ReplayStep = {
@@ -6,9 +7,6 @@ export type ReplayStep = {
   san: string;
   fenBefore: string;
 };
-
-export const DEFAULT_START_FEN =
-  "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 /**
  * Replay một PGN thành chuỗi các thế cờ TRƯỚC mỗi nước, đúng thứ tự ply.
@@ -36,11 +34,11 @@ export function replayGame(pgn: string): ReplayStep[] {
 /** FEN xuất phát của một PGN: header `FEN` (kèm `SetUp`) hoặc thế chuẩn. */
 export function pgnStartFen(pgn: string): string {
   const match = /\[FEN "([^"]+)"\]/.exec(pgn);
-  if (!match) return DEFAULT_START_FEN;
+  if (!match) return STANDARD_START_FEN;
   try {
     new Chess(match[1]);
     return match[1];
   } catch {
-    return DEFAULT_START_FEN;
+    return STANDARD_START_FEN;
   }
 }

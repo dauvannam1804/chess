@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import {
@@ -11,10 +11,14 @@ import {
   getEndgameQueueAction,
   listEndgamePositionsAction,
 } from "@/app/actions";
+import { FeedbackBanner } from "@/components/feedback-banner";
+import type { Feedback } from "@/lib/feedback";
 import {
-  disposeBrowserEngine,
-  getBrowserEngine,
-} from "@/lib/engine/browser-engine";
+  ENGINE_FIRST_MOVE_DELAY_MS,
+  ENGINE_REPLY_DELAY_MS,
+  useEngineOpponent,
+} from "@/lib/engine/use-engine-opponent";
+import { uciToMove } from "@/lib/uci-move";
 import {
   endgameOutcome,
   type EndgameGoal,
@@ -27,10 +31,6 @@ import type {
 
 /** Engine phòng ngự ở độ sâu 12 (theo ticket). */
 const ENGINE_MOVE_DEPTH = 12;
-const ENGINE_FIRST_MOVE_DELAY_MS = 600;
-const ENGINE_REPLY_DELAY_MS = 350;
-
-type Feedback = { kind: "error" | "success" | "info"; text: string } | null;
 
 type EndBanner = { kind: "pass" | "fail"; text: string };
 
@@ -123,29 +123,28 @@ export function EndgameTrainer({
 
   // Drill runner
   const [fen, setFen] = useState("");
-  const [thinking, setThinking] = useState(false);
   const [endBanner, setEndBanner] = useState<EndBanner | null>(null);
   const [moveCount, setMoveCount] = useState(0);
 
   const drillRef = useRef<DrillState | null>(null);
-  const drillIdRef = useRef(0);
-  const thinkingRef = useRef(false);
   const finishedRef = useRef(false);
-  const engineTimerRef = useRef<number | null>(null);
 
-  const clearTimers = () => {
-    if (engineTimerRef.current !== null) {
-      window.clearTimeout(engineTimerRef.current);
-      engineTimerRef.current = null;
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      clearTimers();
-      void disposeBrowserEngine();
-    };
-  }, []);
+  const { thinking, thinkingRef, resetSession, scheduleReply } =
+    useEngineOpponent({
+      depth: ENGINE_MOVE_DEPTH,
+      currentFen: () => drillRef.current?.chess.fen() ?? null,
+      applyMove: (uci) => {
+        const state = drillRef.current;
+        if (!state) return;
+        state.chess.move(uciToMove(uci));
+        setFen(state.chess.fen());
+      },
+      afterMove: () => conclude(),
+      onNoMove: () => conclude(),
+      onError: (message) => {
+        setFeedback({ kind: "error", text: `Lỗi engine: ${message}` });
+      },
+    });
 
   const dueCount = positions.filter(
     (p) =>
@@ -188,66 +187,18 @@ export function EndgameTrainer({
     return true;
   };
 
-  const engineReply = async (gid: number) => {
-    const state = drillRef.current;
-    if (!state || drillIdRef.current !== gid) return;
-    try {
-      const analysis = await getBrowserEngine().analyse(
-        state.chess.fen(),
-        ENGINE_MOVE_DEPTH,
-      );
-      if (drillIdRef.current !== gid) return;
-      const uci = analysis.bestLineUci[0];
-      if (!uci) {
-        // Engine hết nước — thế cờ đã kết thúc, phán định luôn.
-        conclude();
-        return;
-      }
-      state.chess.move({
-        from: uci.slice(0, 2),
-        to: uci.slice(2, 4),
-        promotion: uci.length > 4 ? uci[4] : undefined,
-      });
-      setFen(state.chess.fen());
-      conclude();
-    } catch (cause) {
-      if (drillIdRef.current === gid) {
-        setFeedback({
-          kind: "error",
-          text: `Lỗi engine: ${(cause as Error).message}`,
-        });
-      }
-    } finally {
-      if (drillIdRef.current === gid) {
-        thinkingRef.current = false;
-        setThinking(false);
-      }
-    }
-  };
-
-  const scheduleEngineReply = (delay: number) => {
-    thinkingRef.current = true;
-    setThinking(true);
-    const gid = drillIdRef.current;
-    engineTimerRef.current = window.setTimeout(() => {
-      void engineReply(gid);
-    }, delay);
-  };
-
   const startDrill = (entry: DrillPosition) => {
-    clearTimers();
+    resetSession();
     setFeedback(null);
     setEndBanner(null);
     setMoveCount(0);
-    drillIdRef.current += 1;
     finishedRef.current = false;
-    thinkingRef.current = false;
     drillRef.current = { position: entry, chess: new Chess(entry.fen), moveCount: 0 };
     setFen(entry.fen);
     setPhase("drill");
     if (entry.userColor === "b") {
       // Engine cầm Trắng đi trước.
-      scheduleEngineReply(ENGINE_FIRST_MOVE_DELAY_MS);
+      scheduleReply(ENGINE_FIRST_MOVE_DELAY_MS);
     }
   };
 
@@ -291,17 +242,14 @@ export function EndgameTrainer({
     setFen(state.chess.fen());
     setFeedback(null);
     if (conclude()) return true;
-    scheduleEngineReply(ENGINE_REPLY_DELAY_MS);
+    scheduleReply(ENGINE_REPLY_DELAY_MS);
     return true;
   };
 
   const backToCatalog = () => {
-    clearTimers();
-    drillIdRef.current += 1;
+    resetSession();
     drillRef.current = null;
-    thinkingRef.current = false;
     finishedRef.current = false;
-    setThinking(false);
     setEndBanner(null);
     setFeedback(null);
     setPhase("catalog");
@@ -432,20 +380,7 @@ export function EndgameTrainer({
                 </li>
               ))}
             </ul>
-            {feedback && (
-              <p
-                role={feedback.kind === "error" ? "alert" : "status"}
-                className={
-                  feedback.kind === "error"
-                    ? "mt-3 rounded-md bg-red-100 px-3 py-2 text-sm text-red-800"
-                    : feedback.kind === "success"
-                      ? "mt-3 rounded-md bg-emerald-100 px-3 py-2 text-sm text-emerald-800"
-                      : "mt-3 rounded-md bg-stone-200 px-3 py-2 text-sm text-stone-700"
-                }
-              >
-                {feedback.text}
-              </p>
-            )}
+            <FeedbackBanner feedback={feedback} className="mt-3" />
           </div>
 
           <form
@@ -603,14 +538,7 @@ export function EndgameTrainer({
                 </div>
               </>
             )}
-            {feedback && (
-              <p
-                role="alert"
-                className="rounded-md bg-red-100 px-3 py-2 text-sm text-red-800"
-              >
-                {feedback.text}
-              </p>
-            )}
+            <FeedbackBanner feedback={feedback} />
           </div>
           <aside className="flex flex-col gap-3 text-sm text-stone-600">
             <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">

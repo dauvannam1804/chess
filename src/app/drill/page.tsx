@@ -4,12 +4,14 @@ import { getTrainerService } from "@/lib/trainer-service-server";
 export const dynamic = "force-dynamic";
 
 export default function DrillPage() {
-  const summary = getTrainerService().getDrillSummary();
+  const service = getTrainerService();
+  const summary = service.getDrillSummary();
+  const lineMastery = service.getLineMastery();
 
   return (
     <section>
       <h1 className="text-2xl font-bold">
-        Ôn tập khai cuộc <span className="text-stone-400">(Opening Drill)</span>
+        Ôn tập khai cuộc <span className="text-stone-400">(Drill khai cuộc)</span>
       </h1>
       <p className="mt-2 max-w-prose text-stone-600">
         Drill chủ động: app đưa thế cờ trải đều qua các Dòng khai cuộc và nhánh
@@ -17,7 +19,7 @@ export default function DrillPage() {
         ngày → Mastered), sai thì tụt về hộp 1. Mục Mastered rời vòng quay của
         Daily Review Queue.
       </p>
-      <DrillTrainer initialSummary={summary} />
+      <DrillTrainer initialSummary={summary} initialLineMastery={lineMastery} />
     </section>
   );
 }

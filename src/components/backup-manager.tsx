@@ -98,7 +98,7 @@ export function BackupManager() {
         <p className="mt-1 text-sm text-stone-600">
           Tải một file JSON chứa toàn bộ dữ liệu người dùng: dòng khai cuộc +
           Annotation, lượt giải Puzzle, lịch SRS Leitner (drill + tàn cuộc),
-          ván đấu + cache phân tích, thế tàn cuộc (bao gồm cả catalog). Nội dung
+          Game + cache phân tích, thế tàn cuộc (bao gồm cả catalog). Nội dung
           Puzzle không xuất kèm — nhập lại từ Lichess dump (ADR-0002).
         </p>
         <button

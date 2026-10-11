@@ -8,12 +8,14 @@ import {
   answerDrillItemAction,
   getDrillQueueAction,
   getDrillSummaryAction,
+  getLineMasteryAction,
 } from "@/app/actions";
+import { FeedbackBanner } from "@/components/feedback-banner";
+import type { Feedback } from "@/lib/feedback";
+import { isLineMastered, type LineMastery } from "@/lib/line-mastery";
 import type { DrillItem, DrillSummary, LineNode } from "@/lib/trainer-service";
 
 type Phase = "idle" | "running" | "done";
-
-type Feedback = { kind: "error" | "success" | "info"; text: string } | null;
 
 /**
  * Trạng thái thế cờ đang luyện của một mục hàng đợi.
@@ -43,9 +45,16 @@ function parentNodeOf(item: DrillItem): LineNode {
   return findNode(item.lineTree, item.parentNodeId) ?? item.lineTree;
 }
 
-export function DrillTrainer({ initialSummary }: { initialSummary: DrillSummary }) {
+export function DrillTrainer({
+  initialSummary,
+  initialLineMastery,
+}: {
+  initialSummary: DrillSummary;
+  initialLineMastery: LineMastery[];
+}) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [summary, setSummary] = useState<DrillSummary>(initialSummary);
+  const [lineMastery, setLineMastery] = useState<LineMastery[]>(initialLineMastery);
   const [queue, setQueue] = useState<DrillItem[]>([]);
   const [index, setIndex] = useState(0);
   const indexRef = useRef(0);
@@ -96,7 +105,12 @@ export function DrillTrainer({ initialSummary }: { initialSummary: DrillSummary 
     setChain(null);
     setPhase("done");
     startTransition(async () => {
-      setSummary(await getDrillSummaryAction());
+      const [nextSummary, nextMastery] = await Promise.all([
+        getDrillSummaryAction(),
+        getLineMasteryAction(),
+      ]);
+      setSummary(nextSummary);
+      setLineMastery(nextMastery);
     });
   };
 
@@ -229,7 +243,16 @@ export function DrillTrainer({ initialSummary }: { initialSummary: DrillSummary 
               <span className="text-stone-500">Thuộc (Mastered):</span>{" "}
               <span className="font-semibold text-emerald-700">{summary.mastered}</span>
             </span>
+            <span>
+              <span className="text-stone-500">Line đã thuộc:</span>{" "}
+              <span className="font-semibold text-emerald-700">
+                {lineMastery.filter(isLineMastered).length}/{lineMastery.length}
+              </span>
+            </span>
           </div>
+          <p className="mt-2 text-xs text-stone-400">
+            Line “Thuộc” khi toàn bộ nước repertoire của nó đã Mastered.
+          </p>
           <button
             type="button"
             onClick={startSession}
@@ -244,11 +267,7 @@ export function DrillTrainer({ initialSummary }: { initialSummary: DrillSummary 
               của Leitner (1 → 3 → 7 ngày).
             </p>
           )}
-          {feedback && (
-            <p role="status" className="mt-3 rounded-md bg-stone-200 px-3 py-2 text-sm text-stone-700">
-              {feedback.text}
-            </p>
-          )}
+          <FeedbackBanner feedback={feedback} className="mt-3" />
         </div>
       )}
 
@@ -278,20 +297,7 @@ export function DrillTrainer({ initialSummary }: { initialSummary: DrillSummary 
                 }}
               />
             </div>
-            {feedback && (
-              <p
-                role={feedback.kind === "error" ? "alert" : "status"}
-                className={
-                  feedback.kind === "error"
-                    ? "rounded-md bg-red-100 px-3 py-2 text-sm text-red-800"
-                    : feedback.kind === "success"
-                      ? "rounded-md bg-emerald-100 px-3 py-2 text-sm text-emerald-800"
-                      : "rounded-md bg-stone-200 px-3 py-2 text-sm text-stone-700"
-                }
-              >
-                {feedback.text}
-              </p>
-            )}
+            <FeedbackBanner feedback={feedback} />
           </div>
           <aside className="flex flex-col gap-3 text-sm text-stone-600">
             <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">

@@ -4,6 +4,8 @@ import {
   type TrainerService,
 } from "./trainer-service";
 
+export { isLineMastered } from "./trainer-service";
+
 const globalForTrainer = globalThis as unknown as {
   trainerService?: TrainerService;
 };

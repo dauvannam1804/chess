@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Chess } from "chess.js";
-import { parseImportedGame } from "@/lib/review/pgn-import";
+import { parseImportedGame, IMPORT_ENGINE_STRENGTH } from "@/lib/review/pgn-import";
 import { replayGame } from "@/lib/review/replay-game";
 import type { TrainerService } from "@/lib/trainer-service";
 import { createTrainerService } from "@/lib/trainer-service";
@@ -115,5 +115,34 @@ describe("PGN import → getGame round-trip qua TrainerService", () => {
       finalFen: parsed.finalFen,
     });
     expect(service.getGame(saved.id)?.result).toBe("*");
+  });
+
+  it("sentinel ván import: IMPORT_ENGINE_STRENGTH là một nguồn sự thật duy nhất", () => {
+    // Ván import lưu đúng mức sentinel — trang archive so sánh game
+    // engineStrength với chính hằng số này để hiện nhãn "import".
+    expect(IMPORT_ENGINE_STRENGTH).toBe(1);
+    const parsed = parseImportedGame('[Result "1-0"]\n\n1. e4 e5 1-0');
+    const saved = service.saveGame({
+      pgn: parsed.pgn,
+      result: parsed.result,
+      userColor: "w",
+      engineStrength: IMPORT_ENGINE_STRENGTH,
+      finalFen: parsed.finalFen,
+    });
+    expect(service.getGame(saved.id)?.engineStrength).toBe(
+      IMPORT_ENGINE_STRENGTH,
+    );
+
+    // Ván chơi thật ở mức ≠ sentinel thì không bị nhận nhầm là import.
+    const played = service.saveGame({
+      pgn: parsed.pgn,
+      result: parsed.result,
+      userColor: "w",
+      engineStrength: 4,
+      finalFen: parsed.finalFen,
+    });
+    expect(service.getGame(played.id)?.engineStrength).not.toBe(
+      IMPORT_ENGINE_STRENGTH,
+    );
   });
 });
