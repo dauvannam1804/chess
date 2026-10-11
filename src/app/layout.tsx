@@ -16,6 +16,7 @@ const navItems = [
   { href: "/choi-voi-engine", label: "Chơi với Engine", en: "Play vs Engine" },
   { href: "/xem-lai-van", label: "Xem lại ván", en: "Game Review" },
   { href: "/tan-cuoc", label: "Tàn cuộc", en: "Endgame" },
+  { href: "/sao-luu", label: "Sao lưu", en: "Backup" },
 ];
 
 export default function RootLayout({

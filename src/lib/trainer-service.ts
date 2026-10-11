@@ -10,14 +10,20 @@ import {
   count,
   desc,
   eq,
+  getTableColumns,
   gte,
   inArray,
   isNull,
   lte,
   or,
   sql,
+  type SQL,
 } from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
+import {
+  alias,
+  type SQLiteColumn,
+  type SQLiteTable,
+} from "drizzle-orm/sqlite-core";
 import { Chess } from "chess.js";
 import { Pgn, type PgnMove } from "cm-pgn";
 import {
@@ -293,6 +299,123 @@ function addDays(date: Date, days: number): Date {
 
 const IMPORT_BATCH_SIZE = 1000;
 
+/** Bảng NỘI DUNG không xuất kèm backup — nhập lại từ Lichess dump (ADR-0002). */
+export const BACKUP_EXCLUDED_TABLES = ["puzzles", "puzzle_themes"] as const;
+
+export type BackupPosition = {
+  id: number;
+  fen: string;
+  name: string | null;
+  createdAt: string;
+};
+
+export type BackupPuzzleAttempt = {
+  id: number;
+  puzzleId: string;
+  attemptedAt: string;
+  solved: boolean;
+};
+
+export type BackupRepertoireLine = {
+  id: number;
+  name: string;
+  startFen: string;
+  userColor: string;
+  gameCommentsJson: string;
+  createdAt: string;
+};
+
+export type BackupLineMove = {
+  id: number;
+  lineId: number;
+  parentId: number | null;
+  san: string;
+  uci: string;
+  fenAfter: string;
+  isUserMove: boolean;
+  siblingOrder: number;
+  commentsJson: string;
+  startingCommentsJson: string;
+  nagsJson: string;
+  annotation: string | null;
+};
+
+export type BackupGame = {
+  id: number;
+  pgn: string;
+  result: GameResult;
+  userColor: string;
+  engineStrength: number;
+  finalFen: string;
+  playedAt: string;
+};
+
+export type BackupGameAnalysis = {
+  id: number;
+  gameId: number;
+  evalsJson: string;
+  flagsJson: string;
+  depth: number;
+  analysedAt: string;
+};
+
+export type BackupDrillSchedule = {
+  id: number;
+  nodeId: number;
+  lineId: number;
+  box: number;
+  dueAt: string;
+  masteredAt: string | null;
+  updatedAt: string;
+};
+
+export type BackupEndgamePosition = {
+  id: number;
+  name: string;
+  fen: string;
+  goal: EndgameGoal;
+  userColor: EndgameUserColor;
+  maxMoves: number;
+  source: EndgameSource;
+  createdAt: string;
+};
+
+export type BackupEndgameSchedule = {
+  id: number;
+  positionId: number;
+  box: number;
+  dueAt: string;
+  masteredAt: string | null;
+  updatedAt: string;
+};
+
+export type BackupTables = {
+  positions: BackupPosition[];
+  puzzleAttempts: BackupPuzzleAttempt[];
+  repertoireLines: BackupRepertoireLine[];
+  lineMoves: BackupLineMove[];
+  drillSchedule: BackupDrillSchedule[];
+  games: BackupGame[];
+  gameAnalysis: BackupGameAnalysis[];
+  endgamePositions: BackupEndgamePosition[];
+  endgameSchedule: BackupEndgameSchedule[];
+};
+
+/** File backup JSON (US-35) — payload thuần JSON, truyền mạng/ghi file được. */
+export type BackupFile = {
+  format: "chess-trainer-backup";
+  version: 1;
+  exportedAt: string;
+  excluded: {
+    tables: readonly string[];
+    reason: string;
+  };
+  tables: BackupTables;
+};
+
+const BACKUP_EXCLUDED_REASON =
+  "Nội dung Puzzle (bảng puzzles + puzzle_themes) không xuất kèm — nhập lại từ Lichess dump theo ADR-0002, không phải dữ liệu người dùng.";
+
 export interface TrainerService {
   savePosition(fen: string, name?: string): SavedPosition;
   listPositions(): SavedPosition[];
@@ -327,6 +450,8 @@ export interface TrainerService {
   answerDrillItem(nodeId: number, correct: boolean, now?: Date): DrillScheduleState;
   getDrillSummary(now?: Date): DrillSummary;
   seedEndgameCatalog(): number;
+  exportBackup(): BackupFile;
+  importBackup(data: unknown): Promise<{ imported: Record<string, number> }>;
   listEndgamePositions(): EndgamePosition[];
   addEndgamePosition(input: AddEndgamePositionInput): EndgamePosition;
   answerEndgameItem(
@@ -871,6 +996,106 @@ export function createTrainerService(dbPath: string): TrainerService {
         .run();
       return missing.length;
     },
+    exportBackup(): BackupFile {
+      return {
+        format: "chess-trainer-backup",
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        excluded: {
+          tables: BACKUP_EXCLUDED_TABLES,
+          reason: BACKUP_EXCLUDED_REASON,
+        },
+        tables: {
+          positions: db.select().from(positions).orderBy(asc(positions.id)).all(),
+          puzzleAttempts: db
+            .select()
+            .from(puzzleAttempts)
+            .orderBy(asc(puzzleAttempts.id))
+            .all(),
+          repertoireLines: db
+            .select()
+            .from(repertoireLines)
+            .orderBy(asc(repertoireLines.id))
+            .all(),
+          lineMoves: db.select().from(lineMoves).orderBy(asc(lineMoves.id)).all(),
+          drillSchedule: db
+            .select()
+            .from(drillSchedule)
+            .orderBy(asc(drillSchedule.id))
+            .all()
+            .map(toBackupScheduleRow),
+          games: db.select().from(games).orderBy(asc(games.id)).all(),
+          gameAnalysis: db
+            .select()
+            .from(gameAnalysis)
+            .orderBy(asc(gameAnalysis.id))
+            .all(),
+          endgamePositions: db
+            .select()
+            .from(endgamePositions)
+            .orderBy(asc(endgamePositions.id))
+            .all(),
+          endgameSchedule: db
+            .select()
+            .from(endgameSchedule)
+            .orderBy(asc(endgameSchedule.id))
+            .all()
+            .map(toBackupScheduleRow),
+        },
+      };
+    },
+    /**
+     * Phục hồi từ file backup (US-35): chèn lại row VỚI id gốc theo thứ tự
+     * phụ thuộc FK, GỘP trong đúng một giao dịch — hỏng giữa chừng thì DB
+     * nguyên vẹn. Upsert theo id nên import lại cùng file không nhân bản.
+     *
+     * FK tắt trong lúc import: `puzzle_attempts` tham chiếu bảng NỘI DUNG
+     * `puzzles` (không xuất kèm — ADR-0002), nên phục hồi vào DB chưa nạp
+     * lại dump vẫn hợp lệ; các row treo sẽ nối lại khi dump được nhập.
+     */
+    async importBackup(
+      data: unknown,
+    ): Promise<{ imported: Record<string, number> }> {
+      const backup = parseBackupFile(data);
+      const t = backup.tables;
+      sqlite.pragma("foreign_keys = OFF");
+      try {
+        db.transaction((tx) => {
+          insertBackupRows(tx, positions, t.positions);
+          insertBackupRows(
+            tx,
+            puzzleAttempts,
+            t.puzzleAttempts.map(toDbPuzzleAttempt),
+          );
+          insertBackupRows(tx, repertoireLines, t.repertoireLines);
+          insertBackupRows(tx, lineMoves, t.lineMoves);
+          insertBackupRows(tx, games, t.games.map(toDbGame));
+          insertBackupRows(tx, gameAnalysis, t.gameAnalysis);
+          insertBackupRows(tx, drillSchedule, t.drillSchedule.map(toDbSchedule));
+          insertBackupRows(tx, endgamePositions, t.endgamePositions);
+          insertBackupRows(
+            tx,
+            endgameSchedule,
+            t.endgameSchedule.map(toDbSchedule),
+          );
+        });
+      } finally {
+        sqlite.pragma("foreign_keys = ON");
+      }
+      return {
+        imported: {
+          positions: t.positions.length,
+          puzzleAttempts: t.puzzleAttempts.length,
+          repertoireLines: t.repertoireLines.length,
+          lineMoves: t.lineMoves.length,
+          drillSchedule: t.drillSchedule.length,
+          games: t.games.length,
+          gameAnalysis: t.gameAnalysis.length,
+          endgamePositions: t.endgamePositions.length,
+          endgameSchedule: t.endgameSchedule.length,
+        },
+      };
+    },
     listEndgamePositions(): EndgamePosition[] {
       const rows = db
         .select({
@@ -1130,6 +1355,170 @@ export function createTrainerService(dbPath: string): TrainerService {
 }
 
 type DrizzleDb = ReturnType<typeof drizzle>;
+
+const BACKUP_FORMAT = "chess-trainer-backup";
+const BACKUP_VERSION = 1;
+const BACKUP_TABLE_KEYS = [
+  "positions",
+  "puzzleAttempts",
+  "repertoireLines",
+  "lineMoves",
+  "drillSchedule",
+  "games",
+  "gameAnalysis",
+  "endgamePositions",
+  "endgameSchedule",
+] as const;
+
+/** Chèn tối đa bao nhiêu row mỗi câu INSERT (tránh trần bind param SQLite). */
+const BACKUP_INSERT_CHUNK = 500;
+
+/**
+ * Kiểm tra shape file backup: đúng format, đúng phiên bản, đủ 9 bảng dạng
+ * mảng row có id nguyên. Lỗi thì ném thông điệp tiếng Việt rõ ràng.
+ */
+function parseBackupFile(data: unknown): BackupFile {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    throw new Error(
+      `File backup phải là một đối tượng JSON, nhận được: ${describeJsonType(data)}.`,
+    );
+  }
+  const raw = data as Record<string, unknown>;
+  if (raw.format !== BACKUP_FORMAT) {
+    throw new Error(
+      `Tệp không phải backup của Chess Trainer — thiếu/không đúng "format": ${describeJsonValue(raw.format)} (kỳ vọng "${BACKUP_FORMAT}").`,
+    );
+  }
+  if (raw.version !== BACKUP_VERSION) {
+    throw new Error(
+      `Phiên bản backup không được hỗ trợ: ${describeJsonValue(raw.version)} — ứng dụng đọc được phiên bản ${BACKUP_VERSION}.`,
+    );
+  }
+  const rawTables = raw.tables;
+  if (
+    typeof rawTables !== "object" ||
+    rawTables === null ||
+    Array.isArray(rawTables)
+  ) {
+    throw new Error(
+      "File backup thiếu trường \"tables\" (đối tượng chứa các bảng dữ liệu).",
+    );
+  }
+  const tables: Partial<BackupTables> = {};
+  for (const key of BACKUP_TABLE_KEYS) {
+    const rows = (rawTables as Record<string, unknown>)[key];
+    if (!Array.isArray(rows)) {
+      throw new Error(
+        `File backup thiếu hoặc sai bảng "${key}" — phải là mảng các row.`,
+      );
+    }
+    for (const row of rows) {
+      if (typeof row !== "object" || row === null || Array.isArray(row)) {
+        throw new Error(
+          `Bảng "${key}" có row không phải đối tượng JSON: ${describeJsonValue(row)}.`,
+        );
+      }
+      const id = (row as Record<string, unknown>).id;
+      if (typeof id !== "number" || !Number.isInteger(id)) {
+        throw new Error(
+          `Bảng "${key}" có row thiếu "id" nguyên — backup phải giữ nguyên id gốc.`,
+        );
+      }
+    }
+    // `key` là hợp của 9 khóa nên TS ép intersection khi gán — row đã được
+    // kiểm shape phía trên; `never` an toàn theo nghĩa không thể là giá trị sai.
+    tables[key] = rows as never;
+  }
+  return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    exportedAt: typeof raw.exportedAt === "string" ? raw.exportedAt : "",
+    excluded:
+      typeof raw.excluded === "object" && raw.excluded !== null
+        ? (raw.excluded as BackupFile["excluded"])
+        : { tables: BACKUP_EXCLUDED_TABLES, reason: BACKUP_EXCLUDED_REASON },
+    tables: tables as BackupTables,
+  };
+}
+
+function describeJsonType(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "mảng";
+  return typeof value;
+}
+
+function describeJsonValue(value: unknown): string {
+  const text = JSON.stringify(value) ?? String(value);
+  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
+}
+
+/**
+ * Chèn batch row backup (đã đúng shape) vào một bảng, upsert theo `id`:
+ * row có sẵn thì cập nhật cả các cột — import lại cùng file không nhân bản.
+ */
+function insertBackupRows(
+  tx: Tx,
+  table: SQLiteTable,
+  rows: Record<string, unknown>[],
+): void {
+  if (rows.length === 0) return;
+  const columns = getTableColumns(table);
+  const set: Record<string, SQL> = {};
+  for (const [key, column] of Object.entries(columns)) {
+    if (key === "id") continue;
+    set[key] = sql`excluded.${sql.identifier(column.name)}`;
+  }
+  for (let start = 0; start < rows.length; start += BACKUP_INSERT_CHUNK) {
+    tx
+      .insert(table)
+      .values(rows.slice(start, start + BACKUP_INSERT_CHUNK) as never)
+      .onConflictDoUpdate({
+        target: (table as unknown as { id: SQLiteColumn }).id,
+        set: set as never,
+      })
+      .run();
+  }
+}
+
+function toDbPuzzleAttempt(
+  row: Record<string, unknown>,
+): typeof puzzleAttempts.$inferInsert {
+  return {
+    id: row.id as number,
+    puzzleId: row.puzzleId as string,
+    attemptedAt: row.attemptedAt as string,
+    solved: Boolean(row.solved),
+  };
+}
+
+function toDbGame(
+  row: Record<string, unknown>,
+): typeof games.$inferInsert {
+  return {
+    id: row.id as number,
+    pgn: row.pgn as string,
+    result: row.result as GameResult,
+    userColor: row.userColor as string,
+    engineStrength: row.engineStrength as number,
+    finalFen: row.finalFen as string,
+    playedAt: row.playedAt as string,
+  };
+}
+
+/** ISO string của file backup → Date cho cột timestamp (mode "timestamp"). */
+function toDbSchedule<TRow extends Record<string, unknown>>(
+  row: TRow,
+): Omit<TRow, keyof ScheduleIsoTimestamps> & ScheduleTimestamps {
+  return {
+    ...row,
+    dueAt: new Date(row.dueAt as string),
+    masteredAt:
+      row.masteredAt === null || row.masteredAt === undefined
+        ? null
+        : new Date(row.masteredAt as string),
+    updatedAt: new Date(row.updatedAt as string),
+  };
+}
 
 /** Mệnh đề WHERE dùng chung cho listPuzzles / getRandomBatch. */
 function puzzleFilterWhere(
@@ -1391,6 +1780,29 @@ function toGameAnalysis(row: typeof gameAnalysis.$inferSelect): GameAnalysis {
     flags: JSON.parse(row.flagsJson) as MoveFlag[],
     depth: row.depth,
     analysedAt: row.analysedAt,
+  };
+}
+
+type ScheduleTimestamps = {
+  dueAt: Date;
+  masteredAt: Date | null;
+  updatedAt: Date;
+};
+type ScheduleIsoTimestamps = {
+  dueAt: string;
+  masteredAt: string | null;
+  updatedAt: string;
+};
+
+/** Cột timestamp (Date → epoch trong SQLite) xuất ra ISO string cho JSON. */
+function toBackupScheduleRow<TRow extends ScheduleTimestamps>(
+  row: TRow,
+): Omit<TRow, keyof ScheduleTimestamps> & ScheduleIsoTimestamps {
+  return {
+    ...row,
+    dueAt: row.dueAt.toISOString(),
+    masteredAt: row.masteredAt ? row.masteredAt.toISOString() : null,
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
