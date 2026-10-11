@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { listGamesAction, saveGameAction } from "@/app/actions";
@@ -378,14 +379,20 @@ export function PlayEngine({ initialArchive }: { initialArchive: GamePage }) {
                   <span
                     className={
                       game.result === (game.userColor === "w" ? "1-0" : "0-1")
-                        ? "ml-auto font-medium text-emerald-700"
+                        ? "font-medium text-emerald-700"
                         : game.result === "*"
-                          ? "ml-auto font-medium text-stone-400"
-                          : "ml-auto font-medium text-red-700"
+                          ? "font-medium text-stone-400"
+                          : "font-medium text-red-700"
                     }
                   >
                     {game.result}
                   </span>
+                  <Link
+                    href={`/xem-lai-van/${game.id}`}
+                    className="rounded-md border border-stone-300 px-2 py-0.5 text-xs font-medium text-stone-700 hover:bg-stone-100"
+                  >
+                    Xem lại
+                  </Link>
                 </li>
               ))}
             </ul>
