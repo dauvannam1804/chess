@@ -800,6 +800,12 @@ export function createTrainerService(dbPath: string): TrainerService {
         tx.delete(repertoireLines).where(eq(repertoireLines.id, lineId)).run();
       });
     },
+    /**
+     * Daily Review Queue (US-13): mọi node user-move CHƯA CÓ lịch (cold-start
+     * — line mới nhập phải vào vòng quay ngay) hoặc đã đến hạn mà chưa
+     * Mastered. Lịch là LEFT JOIN nên node chưa trả lời lần nào vẫn vào được
+     * hàng đợi; node đã lịch thì theo phép Leitner như cũ.
+     */
     getDrillQueue(now: Date = new Date()): DrillItem[] {
       const parentMoves = alias(lineMoves, "parent_move");
       const rows = db
@@ -814,11 +820,22 @@ export function createTrainerService(dbPath: string): TrainerService {
           box: drillSchedule.box,
           dueAt: drillSchedule.dueAt,
         })
-        .from(drillSchedule)
-        .innerJoin(lineMoves, eq(lineMoves.id, drillSchedule.nodeId))
-        .innerJoin(repertoireLines, eq(repertoireLines.id, drillSchedule.lineId))
+        .from(lineMoves)
+        .leftJoin(drillSchedule, eq(drillSchedule.nodeId, lineMoves.id))
+        .innerJoin(repertoireLines, eq(repertoireLines.id, lineMoves.lineId))
         .leftJoin(parentMoves, eq(parentMoves.id, lineMoves.parentId))
-        .where(and(isNull(drillSchedule.masteredAt), lte(drillSchedule.dueAt, now)))
+        .where(
+          and(
+            eq(lineMoves.isUserMove, true),
+            or(
+              isNull(drillSchedule.nodeId),
+              and(
+                isNull(drillSchedule.masteredAt),
+                lte(drillSchedule.dueAt, now),
+              ),
+            ),
+          ),
+        )
         .orderBy(asc(drillSchedule.dueAt), asc(drillSchedule.box), asc(lineMoves.id))
         .all();
 
@@ -873,8 +890,9 @@ export function createTrainerService(dbPath: string): TrainerService {
         lineId: row.lineId,
         lineName: row.lineName,
         userColor: row.userColor,
-        box: row.box,
-        dueAt: row.dueAt.toISOString(),
+        // Node chưa có lịch hiển thị như hộp 1, đến hạn ngay (US-13).
+        box: row.box ?? 1,
+        dueAt: row.dueAt ? row.dueAt.toISOString() : now.toISOString(),
         parentFen: row.parentFen,
         expectedSans:
           expectedByParent.get(`${row.lineId}:${row.parentNodeId ?? "root"}`) ?? [],
@@ -943,13 +961,18 @@ export function createTrainerService(dbPath: string): TrainerService {
     },
     getDrillSummary(now: Date = new Date()): DrillSummary {
       // Đếm trong JS để khỏi viết tay mệnh đề so sánh timestamp (cột integer
-      // mode "timestamp") — số node lịch là nhỏ với app local.
+      // mode "timestamp") — số node lịch là nhỏ với app local. Đếm trên toàn
+      // bộ node user-move (LEFT JOIN lịch): node CHƯA CÓ lịch là cold-start
+      // chưa luyện lần nào (US-13) → tính là đến hạn.
       const rows = db
         .select({
+          nodeId: lineMoves.id,
           dueAt: drillSchedule.dueAt,
           masteredAt: drillSchedule.masteredAt,
         })
-        .from(drillSchedule)
+        .from(lineMoves)
+        .leftJoin(drillSchedule, eq(drillSchedule.nodeId, lineMoves.id))
+        .where(eq(lineMoves.isUserMove, true))
         .all();
       let due = 0;
       let mastered = 0;
@@ -957,7 +980,7 @@ export function createTrainerService(dbPath: string): TrainerService {
       for (const row of rows) {
         if (row.masteredAt !== null) {
           mastered += 1;
-        } else if (row.dueAt.getTime() <= now.getTime()) {
+        } else if (row.dueAt === null || row.dueAt.getTime() <= now.getTime()) {
           due += 1;
         } else {
           learning += 1;
