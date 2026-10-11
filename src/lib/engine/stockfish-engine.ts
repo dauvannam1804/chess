@@ -3,10 +3,10 @@ import type { Engine, EngineAnalysis } from "./engine";
 import { skillLevelForStrength, type EngineStrength } from "./strength";
 import type { UciTransport } from "./transport";
 import { parseBestMoveLine, parseInfoLine, toWhitePointOfView } from "./uci";
+import { uciToMove } from "../uci-move";
 
 type AnalyseWaiter = {
   fen: string;
-  depth: number;
   turn: "w" | "b";
   bestLineUci: string[];
   score: { kind: "cp" | "mate"; value: number } | null;
@@ -20,11 +20,8 @@ export function uciLineToSan(fen: string, uciLine: string[]): string[] {
   const chess = new Chess(fen);
   const sans: string[] = [];
   for (const uci of uciLine) {
-    const from = uci.slice(0, 2);
-    const to = uci.slice(2, 4);
-    const promotion = uci.slice(4, 5) || undefined;
     try {
-      sans.push(chess.move({ from, to, promotion }).san);
+      sans.push(chess.move(uciToMove(uci)).san);
     } catch {
       break; // PV có thể cắt ở nước không hợp lệ trong thế này — giữ phần hợp lệ.
     }
@@ -70,7 +67,7 @@ export class StockfishEngine implements Engine {
           bestLineUci: [],
         });
       } else {
-        this.finishAnalyse(bestMove);
+        this.finishAnalyse();
       }
       return;
     }
@@ -95,7 +92,7 @@ export class StockfishEngine implements Engine {
     waiter.resolve(analysis);
   }
 
-  private finishAnalyse(_bestMove: string) {
+  private finishAnalyse() {
     const waiter = this.waiter;
     if (!waiter) return;
     const whitePovScore = waiter.score
@@ -173,7 +170,6 @@ export class StockfishEngine implements Engine {
             }, this.analyseTimeoutMs);
             this.waiter = {
               fen,
-              depth,
               turn,
               bestLineUci: [],
               score: null,

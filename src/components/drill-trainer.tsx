@@ -10,6 +10,8 @@ import {
   getDrillSummaryAction,
   getLineMasteryAction,
 } from "@/app/actions";
+import { FeedbackBanner } from "@/components/feedback-banner";
+import type { Feedback } from "@/lib/feedback";
 import type {
   DrillItem,
   DrillSummary,
@@ -19,8 +21,6 @@ import type {
 import { isLineMastered } from "@/lib/trainer-service";
 
 type Phase = "idle" | "running" | "done";
-
-type Feedback = { kind: "error" | "success" | "info"; text: string } | null;
 
 /**
  * Trạng thái thế cờ đang luyện của một mục hàng đợi.
@@ -272,11 +272,7 @@ export function DrillTrainer({
               của Leitner (1 → 3 → 7 ngày).
             </p>
           )}
-          {feedback && (
-            <p role="status" className="mt-3 rounded-md bg-stone-200 px-3 py-2 text-sm text-stone-700">
-              {feedback.text}
-            </p>
-          )}
+          <FeedbackBanner feedback={feedback} className="mt-3" />
         </div>
       )}
 
@@ -306,20 +302,7 @@ export function DrillTrainer({
                 }}
               />
             </div>
-            {feedback && (
-              <p
-                role={feedback.kind === "error" ? "alert" : "status"}
-                className={
-                  feedback.kind === "error"
-                    ? "rounded-md bg-red-100 px-3 py-2 text-sm text-red-800"
-                    : feedback.kind === "success"
-                      ? "rounded-md bg-emerald-100 px-3 py-2 text-sm text-emerald-800"
-                      : "rounded-md bg-stone-200 px-3 py-2 text-sm text-stone-700"
-                }
-              >
-                {feedback.text}
-              </p>
-            )}
+            <FeedbackBanner feedback={feedback} />
           </div>
           <aside className="flex flex-col gap-3 text-sm text-stone-600">
             <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">

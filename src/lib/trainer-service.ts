@@ -50,6 +50,8 @@ import {
   type EndgameUserColor,
 } from "./endgame/outcome";
 import { parsePuzzleCsv, type ParsedPuzzle } from "./puzzle-csv";
+import { uciToMove } from "./uci-move";
+import { STANDARD_START_FEN } from "./chess-constants";
 import type { MoveFlag } from "./review/flag-mistakes";
 import {
   MAX_ENGINE_STRENGTH,
@@ -57,8 +59,7 @@ import {
 } from "./engine/strength";
 import { GAME_RESULTS, type GameResult } from "./play/game-result";
 
-export const STANDARD_START_FEN =
-  "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+export { STANDARD_START_FEN };
 
 export type SavedPosition = {
   id: number;
@@ -314,6 +315,47 @@ export function nextLeitnerState(
 
 function addDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * 86_400_000);
+}
+
+type LeitnerNext = ReturnType<typeof nextLeitnerState>;
+
+type LeitnerRow = {
+  box: number;
+  dueAt: Date;
+  masteredAt: Date | null;
+  updatedAt: Date;
+};
+
+/**
+ * Hình dạng upsert Leitner dùng chung cho `drill_schedule` (TT-07) và
+ * `endgame_schedule` (TT-10): hai bảng khác nhau ở khóa lịch nhưng cùng bộ
+ * cột + cùng phép toán `nextLeitnerState` (hộp khởi đầu 1 nếu chưa có lịch).
+ */
+function leitnerUpsertParts(
+  existingBox: number | undefined,
+  correct: boolean,
+  now: Date,
+): { next: LeitnerNext; row: LeitnerRow } {
+  const next = nextLeitnerState(existingBox ?? 1, correct, now);
+  return {
+    next,
+    row: {
+      box: next.box,
+      dueAt: next.dueAt,
+      masteredAt: next.masteredAt,
+      updatedAt: now,
+    },
+  };
+}
+
+/** Phần ISO chung của DrillScheduleState / EndgameScheduleState trả client. */
+function scheduleStateFields(next: LeitnerNext, now: Date) {
+  return {
+    box: next.box,
+    dueAt: next.dueAt.toISOString(),
+    masteredAt: next.masteredAt ? next.masteredAt.toISOString() : null,
+    updatedAt: now.toISOString(),
+  };
 }
 
 const IMPORT_BATCH_SIZE = 1000;
@@ -951,33 +993,15 @@ export function createTrainerService(dbPath: string): TrainerService {
         .from(drillSchedule)
         .where(eq(drillSchedule.nodeId, nodeId))
         .get();
-      const next = nextLeitnerState(existing?.box ?? 1, correct, now);
+      const { next, row } = leitnerUpsertParts(existing?.box, correct, now);
       db.insert(drillSchedule)
-        .values({
-          nodeId,
-          lineId: node.lineId,
-          box: next.box,
-          dueAt: next.dueAt,
-          masteredAt: next.masteredAt,
-          updatedAt: now,
-        })
+        .values({ nodeId, lineId: node.lineId, ...row })
         .onConflictDoUpdate({
           target: drillSchedule.nodeId,
-          set: {
-            box: next.box,
-            dueAt: next.dueAt,
-            masteredAt: next.masteredAt,
-            updatedAt: now,
-          },
+          set: row,
         })
         .run();
-      return {
-        nodeId,
-        box: next.box,
-        dueAt: next.dueAt.toISOString(),
-        masteredAt: next.masteredAt ? next.masteredAt.toISOString() : null,
-        updatedAt: now.toISOString(),
-      };
+      return { nodeId, ...scheduleStateFields(next, now) };
     },
     getDrillSummary(now: Date = new Date()): DrillSummary {
       // Đếm trong JS để khỏi viết tay mệnh đề so sánh timestamp (cột integer
@@ -1255,32 +1279,15 @@ export function createTrainerService(dbPath: string): TrainerService {
         .from(endgameSchedule)
         .where(eq(endgameSchedule.positionId, positionId))
         .get();
-      const next = nextLeitnerState(existing?.box ?? 1, correct, now);
+      const { next, row } = leitnerUpsertParts(existing?.box, correct, now);
       db.insert(endgameSchedule)
-        .values({
-          positionId,
-          box: next.box,
-          dueAt: next.dueAt,
-          masteredAt: next.masteredAt,
-          updatedAt: now,
-        })
+        .values({ positionId, ...row })
         .onConflictDoUpdate({
           target: endgameSchedule.positionId,
-          set: {
-            box: next.box,
-            dueAt: next.dueAt,
-            masteredAt: next.masteredAt,
-            updatedAt: now,
-          },
+          set: row,
         })
         .run();
-      return {
-        positionId,
-        box: next.box,
-        dueAt: next.dueAt.toISOString(),
-        masteredAt: next.masteredAt ? next.masteredAt.toISOString() : null,
-        updatedAt: now.toISOString(),
-      };
+      return { positionId, ...scheduleStateFields(next, now) };
     },
     /** Hàng đợi ôn tàn cuộc: đến hạn, chưa Mastered — xếp theo due_at. */
     getEndgameQueue(now: Date = new Date()): EndgameQueueItem[] {
@@ -1914,9 +1921,7 @@ function attachChildrenToHistory(
     const cmExtra: PgnMove = {
       san: extra.san,
       uci: extra.uci,
-      from: extra.uci.slice(0, 2),
-      to: extra.uci.slice(2, 4),
-      promotion: extra.uci.length > 4 ? extra.uci.slice(4) : undefined,
+      ...uciToMove(extra.uci),
       fen: extra.fenAfter,
       ply: parentPly + 1,
       previous: cmParent,

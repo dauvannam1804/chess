@@ -1,6 +1,6 @@
 import Link from "next/link";
+import { GameArchiveList } from "@/components/game-archive-list";
 import { ImportPgnForm } from "@/components/import-pgn-form";
-import { IMPORT_ENGINE_STRENGTH } from "@/lib/review/pgn-import";
 import { getTrainerService } from "@/lib/trainer-service-server";
 
 export const dynamic = "force-dynamic";
@@ -36,53 +36,11 @@ export default function XemLaiVanPage() {
               hoặc import PGN bên phải.
             </p>
           ) : (
-            <ul className="mt-3 divide-y divide-stone-100">
-              {items.map((game) => (
-                <li
-                  key={game.id}
-                  className="flex flex-wrap items-baseline gap-x-2 py-2 text-sm"
-                >
-                  <span className="font-mono text-xs text-stone-400">
-                    {formatPlayedAt(game.playedAt)}
-                  </span>
-                  <span className="text-stone-700">
-                    Bạn cầm {game.userColor === "w" ? "Trắng" : "Đen"}
-                  </span>
-                  <span className="text-stone-500">
-                    ·{" "}
-                    {game.engineStrength === IMPORT_ENGINE_STRENGTH
-                      ? "import"
-                      : `cấp ${game.engineStrength}`}
-                  </span>
-                  <span
-                    className={
-                      game.result === (game.userColor === "w" ? "1-0" : "0-1")
-                        ? "font-medium text-emerald-700"
-                        : game.result === "*"
-                          ? "font-medium text-stone-400"
-                          : "font-medium text-red-700"
-                    }
-                  >
-                    {game.result}
-                  </span>
-                  {service.isGameAnalysed(game.id) ? (
-                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
-                      Đã phân tích
-                    </span>
-                  ) : (
-                    <span className="rounded-full bg-stone-200 px-2 py-0.5 text-xs font-medium text-stone-500">
-                      Chưa phân tích
-                    </span>
-                  )}
-                  <Link
-                    href={`/xem-lai-van/${game.id}`}
-                    className="ml-auto rounded-md border border-stone-300 px-3 py-1 font-medium text-stone-700 hover:bg-stone-100"
-                  >
-                    Xem lại
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            <GameArchiveList
+              games={items}
+              isAnalysed={(game) => service.isGameAnalysed(game.id)}
+              pushLinkRight
+            />
           )}
         </div>
 
@@ -90,8 +48,4 @@ export default function XemLaiVanPage() {
       </div>
     </section>
   );
-}
-
-function formatPlayedAt(playedAt: string): string {
-  return playedAt.slice(0, 16).replace("T", " ");
 }

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Chessboard } from "react-chessboard";
 import { saveGameAnalysisAction } from "@/app/actions";
 import { disposeBrowserEngine, getBrowserEngine } from "@/lib/engine/browser-engine";
+import { formatPlayedAt } from "@/lib/format";
 import { flagMistakes, formatEval, type MoveFlag } from "@/lib/review/flag-mistakes";
 import type { ReplayStep } from "@/lib/review/replay-game";
 import type {
@@ -290,8 +291,4 @@ export function GameReview({
       </aside>
     </div>
   );
-}
-
-function formatPlayedAt(playedAt: string): string {
-  return playedAt.slice(0, 16).replace("T", " ");
 }

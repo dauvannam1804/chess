@@ -7,6 +7,8 @@ import {
   getThemeStatsAction,
   recordAttemptAction,
 } from "@/app/actions";
+import { FeedbackBanner } from "@/components/feedback-banner";
+import type { Feedback } from "@/lib/feedback";
 import {
   applyPlayerMove,
   isSolved,
@@ -37,8 +39,6 @@ const LICHESS_ATTRIBUTION = (
 );
 
 type Phase = "setup" | "solving" | "summary";
-
-type Feedback = { kind: "error" | "success" | "info"; text: string };
 
 type SessionResult = {
   puzzleId: string;
@@ -429,20 +429,7 @@ export function PuzzleTrainer({
                 Motip gợi ý: <span className="font-semibold">{hint}</span>
               </p>
             )}
-            {feedback && (
-              <p
-                role={feedback.kind === "error" ? "alert" : "status"}
-                className={
-                  feedback.kind === "error"
-                    ? "rounded-md bg-red-100 px-3 py-2 text-sm text-red-800"
-                    : feedback.kind === "success"
-                      ? "rounded-md bg-emerald-100 px-3 py-2 text-sm text-emerald-800"
-                      : "rounded-md bg-stone-200 px-3 py-2 text-sm text-stone-700"
-                }
-              >
-                {feedback.text}
-              </p>
-            )}
+            <FeedbackBanner feedback={feedback} />
           </>
         )}
 

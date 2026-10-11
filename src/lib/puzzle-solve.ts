@@ -1,4 +1,5 @@
 import { Chess } from "chess.js";
+import { uciToMove } from "./uci-move";
 
 /**
  * Lõi giải Puzzle thuần (không React): nhận FEN + chuỗi nước UCI của một
@@ -24,18 +25,6 @@ export type PlayerMoveOutcome =
   | { kind: "correct"; san: string; state: PuzzleSolveState }
   | { kind: "illegal"; message: string }
   | { kind: "wrong"; message: string; san: string };
-
-export function uciToMove(uci: string): {
-  from: string;
-  to: string;
-  promotion?: string;
-} {
-  return {
-    from: uci.slice(0, 2),
-    to: uci.slice(2, 4),
-    ...(uci.length > 4 ? { promotion: uci.slice(4) } : {}),
-  };
-}
 
 function parseMoves(moves: string[]): string[] {
   const cleaned = moves

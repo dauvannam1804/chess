@@ -1,28 +1,32 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
-import Link from "next/link";
+import { useRef, useState, useTransition } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { listGamesAction, saveGameAction } from "@/app/actions";
-import { getBrowserEngine, disposeBrowserEngine } from "@/lib/engine/browser-engine";
+import { GameArchiveList } from "@/components/game-archive-list";
+import { FeedbackBanner } from "@/components/feedback-banner";
+import type { Feedback } from "@/lib/feedback";
+import {
+  ENGINE_FIRST_MOVE_DELAY_MS,
+  ENGINE_REPLY_DELAY_MS,
+  useEngineOpponent,
+} from "@/lib/engine/use-engine-opponent";
+import { getBrowserEngine } from "@/lib/engine/browser-engine";
+import { uciToMove } from "@/lib/uci-move";
 import { gameResultFromChess } from "@/lib/play/game-result";
 import { buildGamePgn } from "@/lib/play/game-pgn";
-import type { GamePage, SavedGame } from "@/lib/trainer-service";
+import type { GamePage } from "@/lib/trainer-service";
 
 /** Độ sâu phân tích khi engine đi nước của mình — snappy hơn eval panel. */
 const ENGINE_MOVE_DEPTH = 10;
 const ARCHIVE_LIMIT = 20;
-const ENGINE_FIRST_MOVE_DELAY_MS = 600;
-const ENGINE_REPLY_DELAY_MS = 350;
 
 export const PLAY_ARCHIVE_LIMIT = ARCHIVE_LIMIT;
 
 type UserColor = "w" | "b";
 
 type EndBanner = { kind: "win" | "loss" | "draw"; text: string };
-
-type Feedback = { kind: "error" | "info"; text: string };
 
 type PlayState = {
   chess: Chess;
@@ -39,29 +43,33 @@ export function PlayEngine({ initialArchive }: { initialArchive: GamePage }) {
   const [strength, setStrength] = useState(4);
 
   const [fen, setFen] = useState("");
-  const [thinking, setThinking] = useState(false);
-  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [feedback, setFeedback] = useState<Feedback>(null);
   const [endBanner, setEndBanner] = useState<EndBanner | null>(null);
 
   const gameRef = useRef<PlayState | null>(null);
-  const gameIdRef = useRef(0);
-  const thinkingRef = useRef(false);
   const finishedRef = useRef(false);
-  const engineTimerRef = useRef<number | null>(null);
 
-  const clearTimers = () => {
-    if (engineTimerRef.current !== null) {
-      window.clearTimeout(engineTimerRef.current);
-      engineTimerRef.current = null;
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      clearTimers();
-      void disposeBrowserEngine();
-    };
-  }, []);
+  const { thinking, thinkingRef, resetSession, scheduleReply } =
+    useEngineOpponent({
+      depth: ENGINE_MOVE_DEPTH,
+      currentFen: () => gameRef.current?.chess.fen() ?? null,
+      applyMove: (uci) => {
+        const state = gameRef.current;
+        if (!state) return;
+        state.chess.move(uciToMove(uci));
+        setFen(state.chess.fen());
+      },
+      afterMove: () => concludeIfOver(),
+      onNoMove: () => {
+        setFeedback({
+          kind: "error",
+          text: "Engine không trả lời được nước đi — thử lại hoặc bắt ván mới.",
+        });
+      },
+      onError: (message) => {
+        setFeedback({ kind: "error", text: `Lỗi engine: ${message}` });
+      },
+    });
 
   const startGame = async () => {
     setFeedback(null);
@@ -76,63 +84,15 @@ export function PlayEngine({ initialArchive }: { initialArchive: GamePage }) {
       });
       return;
     }
-    gameIdRef.current += 1;
+    resetSession();
     finishedRef.current = false;
-    thinkingRef.current = false;
     gameRef.current = { chess: new Chess(), userColor: color, engineStrength: strength };
     setFen(gameRef.current.chess.fen());
     setPhase("playing");
     if (color === "b") {
       // Engine cầm Trắng đi trước sau một nhịp ngắn.
-      thinkingRef.current = true;
-      setThinking(true);
-      const gid = gameIdRef.current;
-      engineTimerRef.current = window.setTimeout(() => {
-        void engineMove(gid);
-      }, ENGINE_FIRST_MOVE_DELAY_MS);
+      scheduleReply(ENGINE_FIRST_MOVE_DELAY_MS);
     }
-  };
-
-  const engineMove = async (gameId: number) => {
-    const state = gameRef.current;
-    // Ván đã reset trong lúc chờ — bỏ qua, trạng thái thinking do ván mới quản.
-    if (!state || gameIdRef.current !== gameId) return;
-    try {
-      const analysis = await getBrowserEngine().analyse(
-        state.chess.fen(),
-        ENGINE_MOVE_DEPTH,
-      );
-      if (gameIdRef.current !== gameId) return;
-      const uci = analysis.bestLineUci[0];
-      if (!uci) {
-        thinkingRef.current = false;
-        setThinking(false);
-        setFeedback({
-          kind: "error",
-          text: "Engine không trả lời được nước đi — thử lại hoặc bắt ván mới.",
-        });
-        return;
-      }
-      state.chess.move({
-        from: uci.slice(0, 2),
-        to: uci.slice(2, 4),
-        promotion: uci.length > 4 ? uci[4] : undefined,
-      });
-      setFen(state.chess.fen());
-    } catch (cause) {
-      if (gameIdRef.current === gameId) {
-        setFeedback({
-          kind: "error",
-          text: `Lỗi engine: ${(cause as Error).message}`,
-        });
-      }
-    } finally {
-      if (gameIdRef.current === gameId) {
-        thinkingRef.current = false;
-        setThinking(false);
-      }
-    }
-    concludeIfOver();
   };
 
   const handlePieceDrop = ({
@@ -159,12 +119,7 @@ export function PlayEngine({ initialArchive }: { initialArchive: GamePage }) {
     setFen(state.chess.fen());
     setFeedback(null);
     if (!concludeIfOver()) {
-      thinkingRef.current = true;
-      setThinking(true);
-      const gid = gameIdRef.current;
-      engineTimerRef.current = window.setTimeout(() => {
-        void engineMove(gid);
-      }, ENGINE_REPLY_DELAY_MS);
+      scheduleReply(ENGINE_REPLY_DELAY_MS);
     }
     return true;
   };
@@ -198,12 +153,9 @@ export function PlayEngine({ initialArchive }: { initialArchive: GamePage }) {
   };
 
   const handleNewGame = () => {
-    gameIdRef.current += 1;
-    clearTimers();
+    resetSession();
     gameRef.current = null;
-    thinkingRef.current = false;
     finishedRef.current = false;
-    setThinking(false);
     setFeedback(null);
     setEndBanner(null);
     setPhase("setup");
@@ -344,11 +296,7 @@ export function PlayEngine({ initialArchive }: { initialArchive: GamePage }) {
                 {endBanner.text}
               </p>
             )}
-            {feedback && (
-              <p role="alert" className="rounded-md bg-red-100 px-3 py-2 text-sm text-red-800">
-                {feedback.text}
-              </p>
-            )}
+            <FeedbackBanner feedback={feedback} />
           </>
         )}
       </div>
@@ -366,36 +314,7 @@ export function PlayEngine({ initialArchive }: { initialArchive: GamePage }) {
               Chưa có ván nào — hãy chơi ván đầu tiên, ván kết thúc sẽ tự lưu.
             </p>
           ) : (
-            <ul className="mt-3 divide-y divide-stone-100">
-              {archive.items.map((game: SavedGame) => (
-                <li key={game.id} className="flex flex-wrap items-baseline gap-x-2 py-2 text-sm">
-                  <span className="font-mono text-xs text-stone-400">
-                    {formatPlayedAt(game.playedAt)}
-                  </span>
-                  <span className="text-stone-700">
-                    Bạn cầm {game.userColor === "w" ? "Trắng" : "Đen"}
-                  </span>
-                  <span className="text-stone-500">· cấp {game.engineStrength}</span>
-                  <span
-                    className={
-                      game.result === (game.userColor === "w" ? "1-0" : "0-1")
-                        ? "font-medium text-emerald-700"
-                        : game.result === "*"
-                          ? "font-medium text-stone-400"
-                          : "font-medium text-red-700"
-                    }
-                  >
-                    {game.result}
-                  </span>
-                  <Link
-                    href={`/xem-lai-van/${game.id}`}
-                    className="rounded-md border border-stone-300 px-2 py-0.5 text-xs font-medium text-stone-700 hover:bg-stone-100"
-                  >
-                    Xem lại
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            <GameArchiveList games={archive.items} />
           )}
         </div>
         <div className="rounded-lg border border-stone-200 bg-stone-50 p-4 text-sm text-stone-600">
@@ -409,8 +328,4 @@ export function PlayEngine({ initialArchive }: { initialArchive: GamePage }) {
       </aside>
     </div>
   );
-}
-
-function formatPlayedAt(playedAt: string): string {
-  return playedAt.slice(0, 16).replace("T", " ");
 }
