@@ -124,6 +124,27 @@ export const games = sqliteTable(
   (table) => [index("games_played_at_idx").on(table.playedAt)],
 );
 
+/**
+ * Cache phân tích Game Review (TT-09) — MỘT row cho MỘT game (upsert theo
+ * `game_id`). `evals_json` là mảng eval của các thế TRƯỚC mỗi nước, đánh chỉ
+ * số theo ply (White-POV, xem hợp đồng `Engine`); `flags_json` là mảng nước
+ * lỗi/blunder do `flagMistakes` tính. Mở lại ván đã phân tích đọc row này
+ * thay vì chạy engine.
+ */
+export const gameAnalysis = sqliteTable("game_analysis", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  gameId: integer("game_id")
+    .notNull()
+    .unique()
+    .references(() => games.id, { onDelete: "cascade" }),
+  evalsJson: text("evals_json").notNull(),
+  flagsJson: text("flags_json").notNull(),
+  depth: integer("depth").notNull(),
+  analysedAt: text("analysed_at")
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+});
+
 export const lineMoves = sqliteTable("line_moves", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   lineId: integer("line_id")

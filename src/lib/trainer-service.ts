@@ -22,6 +22,7 @@ import { Chess } from "chess.js";
 import { Pgn, type PgnMove } from "cm-pgn";
 import {
   drillSchedule,
+  gameAnalysis,
   games,
   lineMoves,
   positions,
@@ -31,6 +32,7 @@ import {
   repertoireLines,
 } from "./schema";
 import { parsePuzzleCsv, type ParsedPuzzle } from "./puzzle-csv";
+import type { MoveFlag } from "./review/flag-mistakes";
 import {
   MAX_ENGINE_STRENGTH,
   MIN_ENGINE_STRENGTH,
@@ -107,6 +109,28 @@ export type GamePage = { total: number; items: SavedGame[] };
 export type ListGamesOptions = {
   limit?: number;
   offset?: number;
+};
+
+/** Eval một thế TRƯỚC mỗi nước (White-POV — xem hợp đồng `Engine`). */
+export type PositionEval = {
+  fen: string;
+  evalCp: number | null;
+  mate: number | null;
+};
+
+export type GameAnalysis = {
+  gameId: number;
+  evals: PositionEval[];
+  flags: MoveFlag[];
+  depth: number;
+  analysedAt: string;
+};
+
+export type SaveGameAnalysisInput = {
+  gameId: number;
+  evals: PositionEval[];
+  flags: MoveFlag[];
+  depth: number;
 };
 
 export type RandomBatchFilter = {
@@ -223,6 +247,9 @@ export interface TrainerService {
   saveGame(input: SaveGameInput): SavedGame;
   listGames(options?: ListGamesOptions): GamePage;
   getGame(id: number): SavedGame | null;
+  saveGameAnalysis(input: SaveGameAnalysisInput): GameAnalysis;
+  getGameAnalysis(gameId: number): GameAnalysis | null;
+  isGameAnalysed(gameId: number): boolean;
   createLineFromPgn(name: string, pgnText: string): RepertoireLine;
   listLines(): RepertoireLine[];
   getLineTree(lineId: number): LineNode | null;
@@ -776,6 +803,68 @@ export function createTrainerService(dbPath: string): TrainerService {
           .get() ?? null
       );
     },
+    /**
+     * Lưu cache phân tích Game Review (TT-09), upsert theo `game_id` —
+     * mở lại ván đã review đọc thẳng row này, không chạy engine lần nữa.
+     */
+    saveGameAnalysis(input: SaveGameAnalysisInput): GameAnalysis {
+      const game = db
+        .select({ id: games.id })
+        .from(games)
+        .where(eq(games.id, input.gameId))
+        .get();
+      if (!game) {
+        throw new Error(`Không tìm thấy Game #${input.gameId}.`);
+      }
+      if (!Number.isInteger(input.depth) || input.depth < 1) {
+        throw new Error(
+          `Độ sâu phân tích phải là số nguyên ≥ 1, nhận: ${input.depth}`,
+        );
+      }
+      if (!Array.isArray(input.evals) || input.evals.length === 0) {
+        throw new Error("evals phải là mảng khác rỗng (eval từng thế trước mỗi nước).");
+      }
+      if (!Array.isArray(input.flags)) {
+        throw new Error("flags phải là mảng (có thể rỗng).");
+      }
+      const row = db
+        .insert(gameAnalysis)
+        .values({
+          gameId: input.gameId,
+          evalsJson: JSON.stringify(input.evals),
+          flagsJson: JSON.stringify(input.flags),
+          depth: input.depth,
+        })
+        .onConflictDoUpdate({
+          target: gameAnalysis.gameId,
+          set: {
+            evalsJson: sql`excluded.evals_json`,
+            flagsJson: sql`excluded.flags_json`,
+            depth: sql`excluded.depth`,
+            analysedAt: sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+          },
+        })
+        .returning()
+        .get();
+      return toGameAnalysis(row);
+    },
+    getGameAnalysis(gameId: number): GameAnalysis | null {
+      const row = db
+        .select()
+        .from(gameAnalysis)
+        .where(eq(gameAnalysis.gameId, gameId))
+        .get();
+      return row ? toGameAnalysis(row) : null;
+    },
+    isGameAnalysed(gameId: number): boolean {
+      return (
+        db
+          .select({ gameId: gameAnalysis.gameId })
+          .from(gameAnalysis)
+          .where(eq(gameAnalysis.gameId, gameId))
+          .get() !== undefined
+      );
+    },
     close(): void {
       sqlite.close();
     },
@@ -1015,6 +1104,16 @@ function toLineNode(row: typeof lineMoves.$inferSelect): LineNode {
     startingComments: JSON.parse(row.startingCommentsJson) as string[],
     nags: JSON.parse(row.nagsJson) as number[],
     children: [],
+  };
+}
+
+function toGameAnalysis(row: typeof gameAnalysis.$inferSelect): GameAnalysis {
+  return {
+    gameId: row.gameId,
+    evals: JSON.parse(row.evalsJson) as PositionEval[],
+    flags: JSON.parse(row.flagsJson) as MoveFlag[],
+    depth: row.depth,
+    analysedAt: row.analysedAt,
   };
 }
 

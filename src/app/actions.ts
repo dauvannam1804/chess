@@ -2,8 +2,10 @@
 
 import { getTrainerService } from "@/lib/trainer-service-server";
 import { getExplainer, type DraftAnnotationInput } from "@/lib/explainer";
+import { IMPORT_ENGINE_STRENGTH, parseImportedGame } from "@/lib/review/pgn-import";
 import type {
   ListGamesOptions,
+  SaveGameAnalysisInput,
   SaveGameInput,
 } from "@/lib/trainer-service";
 
@@ -101,4 +103,27 @@ export async function listGamesAction(options?: ListGamesOptions) {
 
 export async function getGameAction(id: number) {
   return getTrainerService().getGame(id);
+}
+
+export async function saveGameAnalysisAction(input: SaveGameAnalysisInput) {
+  return getTrainerService().saveGameAnalysis(input);
+}
+
+/**
+ * Import ván bằng PGN dán vào (US-29): phân tích + tạo Game trong archive,
+ * trả về id để UI điều hướng thẳng tới trang xem lại.
+ */
+export async function importGameFromPgnAction(
+  pgn: string,
+  userColor: string,
+): Promise<number> {
+  const parsed = parseImportedGame(pgn);
+  const game = getTrainerService().saveGame({
+    pgn: parsed.pgn,
+    result: parsed.result,
+    userColor,
+    engineStrength: IMPORT_ENGINE_STRENGTH,
+    finalFen: parsed.finalFen,
+  });
+  return game.id;
 }
