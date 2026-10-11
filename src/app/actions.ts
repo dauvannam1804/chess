@@ -157,3 +157,11 @@ export async function getEndgameQueueAction() {
 export async function deleteEndgamePositionAction(id: number) {
   getTrainerService().deleteEndgamePosition(id);
 }
+
+export async function exportBackupAction() {
+  return getTrainerService().exportBackup();
+}
+
+export async function importBackupAction(data: unknown) {
+  return getTrainerService().importBackup(data);
+}
