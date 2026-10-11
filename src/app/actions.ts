@@ -74,3 +74,15 @@ export async function setAnnotationAction(
 export async function draftAnnotationAction(input: DraftAnnotationInput) {
   return getExplainer().draftAnnotation(input);
 }
+
+export async function getDrillQueueAction() {
+  return getTrainerService().getDrillQueue();
+}
+
+export async function answerDrillItemAction(nodeId: number, correct: boolean) {
+  return getTrainerService().answerDrillItem(nodeId, correct);
+}
+
+export async function getDrillSummaryAction() {
+  return getTrainerService().getDrillSummary();
+}

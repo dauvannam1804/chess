@@ -14,11 +14,14 @@ import {
   inArray,
   isNull,
   lte,
+  or,
   sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import { Chess } from "chess.js";
 import { Pgn, type PgnMove } from "cm-pgn";
 import {
+  drillSchedule,
   lineMoves,
   positions,
   puzzleAttempts,
@@ -105,6 +108,71 @@ export type LineNode = {
   children: LineNode[];
 };
 
+/**
+ * Một mục trong Daily Review Queue (TT-07).
+ *
+ * Ngữ nghĩa node drillable (TT-10 tàn cuộc sẽ tái dùng pattern này):
+ * một Drill item gắn với MỘT node `line_moves` có `is_user_move = 1` — chính
+ * là nước trả lời của người dùng. Thế cờ để luyện là FEN SAU node CHA của
+ * node đó (hoặc `start_fen` nếu cha là root ảo), vì "nước trả lời" thuộc về
+ * thế cờ TRƯỚC nó. Các nước chấp nhận được tại thế cờ đó = toàn bộ con của
+ * node cha (bắc nhánh được tính — so theo SAN), theo thứ tự sibling_order.
+ * `lineTree` kèm theo để UI tự đi tiếp line sau khi đối phương phản hồi.
+ */
+export type DrillItem = {
+  nodeId: number;
+  parentNodeId: number | null;
+  lineId: number;
+  lineName: string;
+  userColor: string;
+  box: number;
+  dueAt: string;
+  parentFen: string;
+  expectedSans: string[];
+  lineTree: LineNode;
+};
+
+export type DrillScheduleState = {
+  nodeId: number;
+  box: number;
+  dueAt: string;
+  masteredAt: string | null;
+  updatedAt: string;
+};
+
+export type DrillSummary = { due: number; mastered: number; learning: number };
+
+export const LEITNER_INTERVALS_DAYS = { 1: 1, 2: 3, 3: 7 } as const;
+
+/**
+ * Một bước Leitner thuần (không DB) để test bảng: đúng thì thăng hộp
+ * (1 → +1 ngày, 2 → +3 ngày, 3 → +7 ngày, 4 → Mastered); SAI thì tụt về
+ * hộp 1, hết Mastered, đến hạn ngay. `dueAt` của item Mastered không còn
+ * ý nghĩa (hàng đợi lọc theo `mastered_at IS NULL`) nên đặt = now.
+ */
+export function nextLeitnerState(
+  box: number,
+  correct: boolean,
+  now: Date,
+): { box: number; dueAt: Date; masteredAt: Date | null } {
+  if (!correct) {
+    return { box: 1, dueAt: now, masteredAt: null };
+  }
+  const currentBox = Math.min(4, Math.max(1, Math.floor(box)));
+  if (currentBox >= 4) {
+    return { box: 4, dueAt: now, masteredAt: now };
+  }
+  return {
+    box: currentBox + 1,
+    dueAt: addDays(now, LEITNER_INTERVALS_DAYS[currentBox as 1 | 2 | 3]),
+    masteredAt: null,
+  };
+}
+
+function addDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * 86_400_000);
+}
+
 const IMPORT_BATCH_SIZE = 1000;
 
 export interface TrainerService {
@@ -131,6 +199,9 @@ export interface TrainerService {
   getAnnotation(lineId: number, nodeId: number): string | null;
   setAnnotation(lineId: number, nodeId: number, text: string | null): void;
   deleteLine(lineId: number): void;
+  getDrillQueue(now?: Date): DrillItem[];
+  answerDrillItem(nodeId: number, correct: boolean, now?: Date): DrillScheduleState;
+  getDrillSummary(now?: Date): DrillSummary;
   close(): void;
 }
 
@@ -469,6 +540,171 @@ export function createTrainerService(dbPath: string): TrainerService {
         tx.delete(lineMoves).where(eq(lineMoves.lineId, lineId)).run();
         tx.delete(repertoireLines).where(eq(repertoireLines.id, lineId)).run();
       });
+    },
+    getDrillQueue(now: Date = new Date()): DrillItem[] {
+      const parentMoves = alias(lineMoves, "parent_move");
+      const rows = db
+        .select({
+          nodeId: lineMoves.id,
+          parentNodeId: lineMoves.parentId,
+          lineId: lineMoves.lineId,
+          lineName: repertoireLines.name,
+          userColor: repertoireLines.userColor,
+          startFen: repertoireLines.startFen,
+          parentFen: sql<string>`COALESCE(${parentMoves.fenAfter}, ${repertoireLines.startFen})`,
+          box: drillSchedule.box,
+          dueAt: drillSchedule.dueAt,
+        })
+        .from(drillSchedule)
+        .innerJoin(lineMoves, eq(lineMoves.id, drillSchedule.nodeId))
+        .innerJoin(repertoireLines, eq(repertoireLines.id, drillSchedule.lineId))
+        .leftJoin(parentMoves, eq(parentMoves.id, lineMoves.parentId))
+        .where(and(isNull(drillSchedule.masteredAt), lte(drillSchedule.dueAt, now)))
+        .orderBy(asc(drillSchedule.dueAt), asc(drillSchedule.box), asc(lineMoves.id))
+        .all();
+
+      if (rows.length === 0) return [];
+
+      // Nước chấp nhận được = toàn bộ con của node cha (hoặc con của root
+      // ảo khi parentNodeId null), theo sibling_order — nhánh được tính.
+      const branchParentIds = [
+        ...new Set(
+          rows.flatMap((row) => (row.parentNodeId === null ? [] : [row.parentNodeId])),
+        ),
+      ];
+      const rootLineIds = [
+        ...new Set(rows.flatMap((row) => (row.parentNodeId === null ? [row.lineId] : []))),
+      ];
+      const children = db
+        .select({
+          lineId: lineMoves.lineId,
+          parentId: lineMoves.parentId,
+          san: lineMoves.san,
+          siblingOrder: lineMoves.siblingOrder,
+        })
+        .from(lineMoves)
+        .where(
+          or(
+            branchParentIds.length > 0 ? inArray(lineMoves.parentId, branchParentIds) : undefined,
+            rootLineIds.length > 0
+              ? and(isNull(lineMoves.parentId), inArray(lineMoves.lineId, rootLineIds))
+              : undefined,
+          ),
+        )
+        .orderBy(asc(lineMoves.siblingOrder), asc(lineMoves.id))
+        .all();
+
+      const expectedByParent = new Map<string, string[]>();
+      for (const child of children) {
+        const key = `${child.lineId}:${child.parentId ?? "root"}`;
+        const sans = expectedByParent.get(key) ?? [];
+        sans.push(child.san);
+        expectedByParent.set(key, sans);
+      }
+
+      const treesByLine = new Map<number, LineNode>();
+      for (const lineId of new Set(rows.map((row) => row.lineId))) {
+        const tree = this.getLineTree(lineId);
+        if (tree) treesByLine.set(lineId, tree);
+      }
+
+      return rows.map((row) => ({
+        nodeId: row.nodeId,
+        parentNodeId: row.parentNodeId,
+        lineId: row.lineId,
+        lineName: row.lineName,
+        userColor: row.userColor,
+        box: row.box,
+        dueAt: row.dueAt.toISOString(),
+        parentFen: row.parentFen,
+        expectedSans:
+          expectedByParent.get(`${row.lineId}:${row.parentNodeId ?? "root"}`) ?? [],
+        lineTree: treesByLine.get(row.lineId) ?? {
+          id: null,
+          san: null,
+          uci: null,
+          fenAfter: row.startFen,
+          isUserMove: false,
+          comments: [],
+          startingComments: [],
+          nags: [],
+          children: [],
+        },
+      }));
+    },
+    /**
+     * Một lượt trả lời Drill (Leitner). Lịch tạo LƯỜI: lần đầu node được
+     * trả lời sẽ upsert row `drill_schedule` (box khởi đầu 1 nếu chưa có).
+     */
+    answerDrillItem(
+      nodeId: number,
+      correct: boolean,
+      now: Date = new Date(),
+    ): DrillScheduleState {
+      const node = db
+        .select({ id: lineMoves.id, lineId: lineMoves.lineId })
+        .from(lineMoves)
+        .where(eq(lineMoves.id, nodeId))
+        .get();
+      if (!node) {
+        throw new Error(`Không tìm thấy node #${nodeId} trong line_moves.`);
+      }
+      const existing = db
+        .select({ box: drillSchedule.box })
+        .from(drillSchedule)
+        .where(eq(drillSchedule.nodeId, nodeId))
+        .get();
+      const next = nextLeitnerState(existing?.box ?? 1, correct, now);
+      db.insert(drillSchedule)
+        .values({
+          nodeId,
+          lineId: node.lineId,
+          box: next.box,
+          dueAt: next.dueAt,
+          masteredAt: next.masteredAt,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: drillSchedule.nodeId,
+          set: {
+            box: next.box,
+            dueAt: next.dueAt,
+            masteredAt: next.masteredAt,
+            updatedAt: now,
+          },
+        })
+        .run();
+      return {
+        nodeId,
+        box: next.box,
+        dueAt: next.dueAt.toISOString(),
+        masteredAt: next.masteredAt ? next.masteredAt.toISOString() : null,
+        updatedAt: now.toISOString(),
+      };
+    },
+    getDrillSummary(now: Date = new Date()): DrillSummary {
+      // Đếm trong JS để khỏi viết tay mệnh đề so sánh timestamp (cột integer
+      // mode "timestamp") — số node lịch là nhỏ với app local.
+      const rows = db
+        .select({
+          dueAt: drillSchedule.dueAt,
+          masteredAt: drillSchedule.masteredAt,
+        })
+        .from(drillSchedule)
+        .all();
+      let due = 0;
+      let mastered = 0;
+      let learning = 0;
+      for (const row of rows) {
+        if (row.masteredAt !== null) {
+          mastered += 1;
+        } else if (row.dueAt.getTime() <= now.getTime()) {
+          due += 1;
+        } else {
+          learning += 1;
+        }
+      }
+      return { due, mastered, learning };
     },
     close(): void {
       sqlite.close();
