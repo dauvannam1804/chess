@@ -13,3 +13,9 @@ Default five-role triage vocabulary (`needs-triage`, `needs-info`, `ready-for-ag
 ### Domain docs
 
 Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Working agreements
+
+- `npm test` green before reporting work done. CI enforces test + typecheck + build + `npm run check:migrations` on main.
+- Max 3 subagents in parallel — rate limits.
+- Review-time rules live in `CODING_STANDARDS.md`.
