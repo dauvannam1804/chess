@@ -6,6 +6,7 @@ import { useMemo, useState, useTransition } from "react";
 import { Chessboard } from "react-chessboard";
 import { addBranchAndMoveAction, exportLinePgnAction } from "@/app/actions";
 import { AnnotationPanel } from "@/components/annotation-panel";
+import { EngineAnalysisPanel } from "@/components/engine-analysis-panel";
 import type { LineNode, RepertoireLine } from "@/lib/trainer-service";
 
 function findNode(node: LineNode, id: number | null): LineNode | null {
@@ -256,6 +257,7 @@ export function LineWorkbench({
             FEN: {boardFen}
           </p>
         )}
+        <EngineAnalysisPanel fen={boardFen} />
         {mainLineEnd.id !== selectedNode.id && (
           <button
             type="button"
