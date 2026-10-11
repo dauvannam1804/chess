@@ -57,6 +57,13 @@
       "when": 1791737311221,
       "tag": "0007_game_analysis",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791737400000,
+      "tag": "0008_endgame",
+      "breakpoints": true
     }
   ]
 }

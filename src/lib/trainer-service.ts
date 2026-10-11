@@ -22,6 +22,8 @@ import { Chess } from "chess.js";
 import { Pgn, type PgnMove } from "cm-pgn";
 import {
   drillSchedule,
+  endgamePositions,
+  endgameSchedule,
   gameAnalysis,
   games,
   lineMoves,
@@ -31,6 +33,16 @@ import {
   puzzles,
   repertoireLines,
 } from "./schema";
+import {
+  ENDGAME_CATALOG,
+  type SeededEndgamePosition,
+} from "./endgame/catalog";
+import {
+  DEFAULT_MAX_ENDGAME_MOVES,
+  type EndgameGoal,
+  type EndgameSource,
+  type EndgameUserColor,
+} from "./endgame/outcome";
 import { parsePuzzleCsv, type ParsedPuzzle } from "./puzzle-csv";
 import type { MoveFlag } from "./review/flag-mistakes";
 import {
@@ -199,6 +211,55 @@ export type DrillScheduleState = {
 
 export type DrillSummary = { due: number; mastered: number; learning: number };
 
+export type { EndgameGoal, EndgameSource, EndgameUserColor };
+
+/**
+ * Một Thế tàn cuộc (TT-10) kèm trạng thái SRS Leitner của nó. Trạng thái
+ * lịch nullable vì lịch tạo LƯỜI — thế chưa luyện lần nào thì chưa có row
+ * `endgame_schedule`.
+ */
+export type EndgamePosition = {
+  id: number;
+  name: string;
+  fen: string;
+  goal: EndgameGoal;
+  userColor: EndgameUserColor;
+  maxMoves: number;
+  source: EndgameSource;
+  createdAt: string;
+  box: number | null;
+  dueAt: string | null;
+  masteredAt: string | null;
+};
+
+export type EndgameScheduleState = {
+  positionId: number;
+  box: number;
+  dueAt: string;
+  masteredAt: string | null;
+  updatedAt: string;
+};
+
+/** Mục trong hàng đợi ôn tàn cuộc: do đã trả lời nên lịch luôn tồn tại. */
+export type EndgameQueueItem = {
+  positionId: number;
+  name: string;
+  fen: string;
+  goal: EndgameGoal;
+  userColor: EndgameUserColor;
+  maxMoves: number;
+  box: number;
+  dueAt: string;
+};
+
+export type AddEndgamePositionInput = {
+  name: string;
+  fen: string;
+  goal: EndgameGoal;
+  userColor: EndgameUserColor;
+  maxMoves?: number;
+};
+
 export const LEITNER_INTERVALS_DAYS = { 1: 1, 2: 3, 3: 7 } as const;
 
 /**
@@ -265,6 +326,16 @@ export interface TrainerService {
   getDrillQueue(now?: Date): DrillItem[];
   answerDrillItem(nodeId: number, correct: boolean, now?: Date): DrillScheduleState;
   getDrillSummary(now?: Date): DrillSummary;
+  seedEndgameCatalog(): number;
+  listEndgamePositions(): EndgamePosition[];
+  addEndgamePosition(input: AddEndgamePositionInput): EndgamePosition;
+  answerEndgameItem(
+    positionId: number,
+    correct: boolean,
+    now?: Date,
+  ): EndgameScheduleState;
+  getEndgameQueue(now?: Date): EndgameQueueItem[];
+  deleteEndgamePosition(id: number): void;
   close(): void;
 }
 
@@ -769,6 +840,193 @@ export function createTrainerService(dbPath: string): TrainerService {
       }
       return { due, mastered, learning };
     },
+    /**
+     * Nạp catalog Thế tàn cuộc kinh điển (TT-10). Idempotent theo `name`:
+     * chỉ chèn những thế còn thiếu, không đụng gì đã có (kể cả lịch đã tạo).
+     * Trả về số thế mới được chèn.
+     */
+    seedEndgameCatalog(): number {
+      const existingNames = new Set(
+        db
+          .select({ name: endgamePositions.name })
+          .from(endgamePositions)
+          .all()
+          .map((row) => row.name),
+      );
+      const missing: SeededEndgamePosition[] = ENDGAME_CATALOG.filter(
+        (entry) => !existingNames.has(entry.name),
+      );
+      if (missing.length === 0) return 0;
+      db.insert(endgamePositions)
+        .values(
+          missing.map((entry) => ({
+            name: entry.name,
+            fen: entry.fen,
+            goal: entry.goal,
+            userColor: entry.userColor,
+            maxMoves: DEFAULT_MAX_ENDGAME_MOVES,
+            source: "catalog" as const,
+          })),
+        )
+        .run();
+      return missing.length;
+    },
+    listEndgamePositions(): EndgamePosition[] {
+      const rows = db
+        .select({
+          id: endgamePositions.id,
+          name: endgamePositions.name,
+          fen: endgamePositions.fen,
+          goal: endgamePositions.goal,
+          userColor: endgamePositions.userColor,
+          maxMoves: endgamePositions.maxMoves,
+          source: endgamePositions.source,
+          createdAt: endgamePositions.createdAt,
+          box: endgameSchedule.box,
+          dueAt: endgameSchedule.dueAt,
+          masteredAt: endgameSchedule.masteredAt,
+        })
+        .from(endgamePositions)
+        .leftJoin(
+          endgameSchedule,
+          eq(endgameSchedule.positionId, endgamePositions.id),
+        )
+        .orderBy(asc(endgamePositions.id))
+        .all();
+      return rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        fen: row.fen,
+        goal: row.goal,
+        userColor: row.userColor,
+        maxMoves: row.maxMoves,
+        source: row.source,
+        createdAt: row.createdAt,
+        box: row.box ?? null,
+        dueAt: row.dueAt ? row.dueAt.toISOString() : null,
+        masteredAt: row.masteredAt ? row.masteredAt.toISOString() : null,
+      }));
+    },
+    addEndgamePosition(input: AddEndgamePositionInput): EndgamePosition {
+      const name = assertNonEmpty(input.name, "Tên thế tàn cuộc");
+      assertValidFen(input.fen);
+      const goal = assertEndgameGoal(input.goal);
+      const userColor = assertUserColor(input.userColor) as EndgameUserColor;
+      const maxMoves = assertMaxMoves(input.maxMoves);
+      const inserted = db
+        .insert(endgamePositions)
+        .values({ name, fen: input.fen, goal, userColor, maxMoves, source: "import" })
+        .returning()
+        .get();
+      return {
+        id: inserted.id,
+        name: inserted.name,
+        fen: inserted.fen,
+        goal: inserted.goal,
+        userColor: inserted.userColor,
+        maxMoves: inserted.maxMoves,
+        source: inserted.source,
+        createdAt: inserted.createdAt,
+        box: null,
+        dueAt: null,
+        masteredAt: null,
+      };
+    },
+    /**
+     * Một lượt trả lời Drill tàn cuộc (Leitner). Dùng lại đúng phép toán
+     * `nextLeitnerState` của drill khai cuộc; lịch tạo LƯỜI trên bảng
+     * `endgame_schedule` (upsert theo `position_id`) — tách riêng khỏi
+     * `drill_schedule` của TT-07.
+     */
+    answerEndgameItem(
+      positionId: number,
+      correct: boolean,
+      now: Date = new Date(),
+    ): EndgameScheduleState {
+      const position = db
+        .select({ id: endgamePositions.id })
+        .from(endgamePositions)
+        .where(eq(endgamePositions.id, positionId))
+        .get();
+      if (!position) {
+        throw new Error(
+          `Không tìm thấy Thế tàn cuộc #${positionId} trong endgame_positions.`,
+        );
+      }
+      const existing = db
+        .select({ box: endgameSchedule.box })
+        .from(endgameSchedule)
+        .where(eq(endgameSchedule.positionId, positionId))
+        .get();
+      const next = nextLeitnerState(existing?.box ?? 1, correct, now);
+      db.insert(endgameSchedule)
+        .values({
+          positionId,
+          box: next.box,
+          dueAt: next.dueAt,
+          masteredAt: next.masteredAt,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: endgameSchedule.positionId,
+          set: {
+            box: next.box,
+            dueAt: next.dueAt,
+            masteredAt: next.masteredAt,
+            updatedAt: now,
+          },
+        })
+        .run();
+      return {
+        positionId,
+        box: next.box,
+        dueAt: next.dueAt.toISOString(),
+        masteredAt: next.masteredAt ? next.masteredAt.toISOString() : null,
+        updatedAt: now.toISOString(),
+      };
+    },
+    /** Hàng đợi ôn tàn cuộc: đến hạn, chưa Mastered — xếp theo due_at. */
+    getEndgameQueue(now: Date = new Date()): EndgameQueueItem[] {
+      return db
+        .select({
+          positionId: endgamePositions.id,
+          name: endgamePositions.name,
+          fen: endgamePositions.fen,
+          goal: endgamePositions.goal,
+          userColor: endgamePositions.userColor,
+          maxMoves: endgamePositions.maxMoves,
+          box: endgameSchedule.box,
+          dueAt: endgameSchedule.dueAt,
+        })
+        .from(endgameSchedule)
+        .innerJoin(
+          endgamePositions,
+          eq(endgamePositions.id, endgameSchedule.positionId),
+        )
+        .where(
+          and(
+            isNull(endgameSchedule.masteredAt),
+            lte(endgameSchedule.dueAt, now),
+          ),
+        )
+        .orderBy(asc(endgameSchedule.dueAt), asc(endgameSchedule.box), asc(endgamePositions.id))
+        .all()
+        .map((row) => ({
+          ...row,
+          dueAt: row.dueAt.toISOString(),
+        }));
+    },
+    deleteEndgamePosition(id: number): void {
+      const result = db
+        .delete(endgamePositions)
+        .where(eq(endgamePositions.id, id))
+        .run();
+      if (result.changes === 0) {
+        throw new Error(
+          `Không tìm thấy Thế tàn cuộc #${id} trong endgame_positions.`,
+        );
+      }
+    },
     saveGame(input: SaveGameInput): SavedGame {
       const result = assertGameResult(input.result);
       const userColor = assertUserColor(input.userColor);
@@ -961,6 +1219,25 @@ function assertUserColor(userColor: string): string {
     throw new Error(`Màu quân của bạn không hợp lệ: "${userColor}" — phải là 'w' | 'b'.`);
   }
   return userColor;
+}
+
+function assertEndgameGoal(goal: string): EndgameGoal {
+  if (goal !== "win" && goal !== "draw") {
+    throw new Error(
+      `Mục tiêu của thế tàn cuộc không hợp lệ: "${goal}" — phải là 'win' | 'draw'.`,
+    );
+  }
+  return goal;
+}
+
+function assertMaxMoves(maxMoves: number | undefined): number {
+  const resolved = maxMoves ?? DEFAULT_MAX_ENDGAME_MOVES;
+  if (!Number.isInteger(resolved) || resolved < 1) {
+    throw new Error(
+      `Số nước tối đa phải là số nguyên ≥ 1, nhận: ${maxMoves}`,
+    );
+  }
+  return resolved;
 }
 
 function assertEngineStrength(engineStrength: number): number {

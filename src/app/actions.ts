@@ -4,6 +4,7 @@ import { getTrainerService } from "@/lib/trainer-service-server";
 import { getExplainer, type DraftAnnotationInput } from "@/lib/explainer";
 import { IMPORT_ENGINE_STRENGTH, parseImportedGame } from "@/lib/review/pgn-import";
 import type {
+  AddEndgamePositionInput,
   ListGamesOptions,
   SaveGameAnalysisInput,
   SaveGameInput,
@@ -126,4 +127,33 @@ export async function importGameFromPgnAction(
     finalFen: parsed.finalFen,
   });
   return game.id;
+}
+
+export async function seedEndgameCatalogAction() {
+  return getTrainerService().seedEndgameCatalog();
+}
+
+export async function listEndgamePositionsAction() {
+  return getTrainerService().listEndgamePositions();
+}
+
+export async function addEndgamePositionAction(
+  input: AddEndgamePositionInput,
+) {
+  return getTrainerService().addEndgamePosition(input);
+}
+
+export async function answerEndgameItemAction(
+  positionId: number,
+  correct: boolean,
+) {
+  return getTrainerService().answerEndgameItem(positionId, correct);
+}
+
+export async function getEndgameQueueAction() {
+  return getTrainerService().getEndgameQueue();
+}
+
+export async function deleteEndgamePositionAction(id: number) {
+  getTrainerService().deleteEndgamePosition(id);
 }

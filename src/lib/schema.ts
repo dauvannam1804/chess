@@ -9,6 +9,12 @@ import {
   type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import type { GameResult } from "./play/game-result";
+import {
+  DEFAULT_MAX_ENDGAME_MOVES,
+  type EndgameGoal,
+  type EndgameSource,
+  type EndgameUserColor,
+} from "./endgame/outcome";
 
 export const positions = sqliteTable("positions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -163,3 +169,58 @@ export const lineMoves = sqliteTable("line_moves", {
   nagsJson: text("nags_json").notNull().default("[]"),
   annotation: text("annotation"),
 });
+
+/**
+ * Một Thế tàn cuộc (Endgame Position) — từ catalog cứng hoặc FEN người dùng
+ * nhập tay (TT-10). `user_color` là màu MẠNH mà người dùng cầm trong drill;
+ * `goal` định hình thắng/thua của phiên (chiếu hết vs hòa/phòng ngự).
+ */
+export const endgamePositions = sqliteTable(
+  "endgame_positions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    fen: text("fen").notNull(),
+    goal: text("goal").$type<EndgameGoal>().notNull(),
+    userColor: text("user_color").$type<EndgameUserColor>().notNull(),
+    maxMoves: integer("max_moves").notNull().default(DEFAULT_MAX_ENDGAME_MOVES),
+    source: text("source").$type<EndgameSource>().notNull().default("catalog"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+  },
+  (table) => [
+    check("endgame_positions_goal_check", sql`${table.goal} in ('win','draw')`),
+    check(
+      "endgame_positions_user_color_check",
+      sql`${table.userColor} in ('w','b')`,
+    ),
+    check(
+      "endgame_positions_source_check",
+      sql`${table.source} in ('catalog','import')`,
+    ),
+  ],
+);
+
+/**
+ * Lịch SRS Leitner của tàn cuộc — bảng RIÊNG, không đụng `drill_schedule`
+ * (TT-07). Cột giống hệt, khóa lịch là `position_id` (unique). Tạo row LƯỜI:
+ * lần đầu một thế được trả lời mới có lịch — xem answerEndgameItem.
+ */
+export const endgameSchedule = sqliteTable(
+  "endgame_schedule",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    positionId: integer("position_id")
+      .notNull()
+      .unique()
+      .references(() => endgamePositions.id, { onDelete: "cascade" }),
+    box: integer("box").notNull().default(1),
+    dueAt: integer("due_at", { mode: "timestamp" }).notNull(),
+    masteredAt: integer("mastered_at", { mode: "timestamp" }),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    check("endgame_schedule_box_range", sql`${table.box} between 1 and 4`),
+  ],
+);
