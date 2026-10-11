@@ -2,6 +2,10 @@
 
 import { getTrainerService } from "@/lib/trainer-service-server";
 import { getExplainer, type DraftAnnotationInput } from "@/lib/explainer";
+import type {
+  ListGamesOptions,
+  SaveGameInput,
+} from "@/lib/trainer-service";
 
 export async function savePositionAction(fen: string, name?: string) {
   return getTrainerService().savePosition(fen, name);
@@ -73,4 +77,16 @@ export async function setAnnotationAction(
 /** Nháp từ Explainer — chỉ là dữ liệu; persist chỉ khi người dùng bấm lưu. */
 export async function draftAnnotationAction(input: DraftAnnotationInput) {
   return getExplainer().draftAnnotation(input);
+}
+
+export async function saveGameAction(input: SaveGameInput) {
+  return getTrainerService().saveGame(input);
+}
+
+export async function listGamesAction(options?: ListGamesOptions) {
+  return getTrainerService().listGames(options);
+}
+
+export async function getGameAction(id: number) {
+  return getTrainerService().getGame(id);
 }

@@ -36,6 +36,13 @@
       "when": 1791733504238,
       "tag": "0004_add_annotation",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791733600000,
+      "tag": "0005_games",
+      "breakpoints": true
     }
   ]
 }
