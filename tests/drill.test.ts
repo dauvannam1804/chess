@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createTrainerService,
+  isLineMastered,
   nextLeitnerState,
   type LineNode,
   type TrainerService,
@@ -90,7 +91,6 @@ describe("TrainerService — Drill (lịch Leitner + hàng đợi ôn)", () => {
     // Cả hai node user-move chưa từng trả lời → do lịch tạo lười, hàng đợi
     // phải nối vào bằng LEFT JOIN thay vì chỉ đọc drill_schedule.
     expect(queue.map((item) => item.nodeId)).toEqual([e4.id, nf3.id]);
-    expect(e4.nodeId).not.toBeNull();
     const e4Item = queue[0];
     expect(e4Item.lineId).toBe(line.id);
     expect(e4Item.lineName).toBe("Ý");
@@ -300,5 +300,97 @@ describe("TrainerService — Drill (lịch Leitner + hàng đợi ôn)", () => {
       mastered: 0,
       learning: 0,
     });
+  });
+});
+
+describe("TrainerService — mức thuộc từng line (US-21)", () => {
+  let dir: string;
+  let dbPath: string;
+  let service: TrainerService;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "chess-drill-"));
+    dbPath = join(dir, "chess.db");
+    service = createTrainerService(dbPath);
+  });
+
+  afterEach(() => {
+    service.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("không line nào → rỗng; line mới chưa luyện → Đang học (0/N)", () => {
+    expect(service.getLineMastery()).toEqual([]);
+
+    const line = service.createLineFromPgn("Ý", "1. e4 e5 2. Nf3 Nc6");
+
+    expect(service.getLineMastery()).toEqual([
+      { lineId: line.id, userMoveCount: 2, masteredCount: 0 },
+    ]);
+    expect(isLineMastered(service.getLineMastery()[0]!)).toBe(false);
+  });
+
+  it("một phần node Mastered → vẫn Đang học (partial)", () => {
+    const line = service.createLineFromPgn("Ý", "1. e4 e5 2. Nf3 Nc6");
+    const e4 = nodeAtPath(service, line.id, ["e4"]);
+    let now = new Date("2026-10-11T08:00:00.000Z");
+    for (let turn = 0; turn < 4; turn += 1) {
+      now = new Date(Date.parse(service.answerDrillItem(e4.id!, true, now).dueAt));
+    }
+
+    const mastery = service.getLineMastery()[0]!;
+
+    // e4 đã Mastered nhưng Nf3 chưa → line chưa "Thuộc".
+    expect(mastery).toEqual({ lineId: line.id, userMoveCount: 2, masteredCount: 1 });
+    expect(isLineMastered(mastery)).toBe(false);
+  });
+
+  it("tất cả node user-move Mastered → line Thuộc (all mastered)", () => {
+    const line = service.createLineFromPgn("Ý", "1. e4 e5 2. Nf3 Nc6");
+    let now = new Date("2026-10-11T08:00:00.000Z");
+    for (const path of [["e4"], ["e4", "e5", "Nf3"]]) {
+      const node = nodeAtPath(service, line.id, path);
+      for (let turn = 0; turn < 4; turn += 1) {
+        now = new Date(Date.parse(service.answerDrillItem(node.id!, true, now).dueAt));
+      }
+    }
+
+    const mastery = service.getLineMastery()[0]!;
+
+    expect(mastery).toEqual({ lineId: line.id, userMoveCount: 2, masteredCount: 2 });
+    expect(isLineMastered(mastery)).toBe(true);
+  });
+
+  it("trả lời SAI sau khi Mastered → line rời trạng thái Thuộc", () => {
+    const line = service.createLineFromPgn("Ý", "1. e4 e5 2. Nf3 Nc6");
+    let now = new Date("2026-10-11T08:00:00.000Z");
+    for (const path of [["e4"], ["e4", "e5", "Nf3"]]) {
+      const node = nodeAtPath(service, line.id, path);
+      for (let turn = 0; turn < 4; turn += 1) {
+        now = new Date(Date.parse(service.answerDrillItem(node.id!, true, now).dueAt));
+      }
+    }
+    expect(isLineMastered(service.getLineMastery()[0]!)).toBe(true);
+
+    const e4 = nodeAtPath(service, line.id, ["e4"]);
+    service.answerDrillItem(e4.id!, false, now);
+
+    const mastery = service.getLineMastery()[0]!;
+    expect(mastery.masteredCount).toBe(1);
+    expect(isLineMastered(mastery)).toBe(false);
+  });
+
+  it("nước đối phương không tính vào mức thuộc; mỗi line một entry riêng", () => {
+    const a = service.createLineFromPgn("Ý", "1. e4 e5 2. Nf3 Nc6");
+    const b = service.createLineFromPgn("Pháp", "1. e4 e6 2. d4 d5");
+    const e5 = nodeAtPath(service, a.id, ["e4", "e5"]);
+
+    // e5 là nước Đen — lịch tồn tại cũng không được đếm là node user-move.
+    service.answerDrillItem(e5.id!, false);
+
+    expect(service.getLineMastery()).toEqual([
+      { lineId: a.id, userMoveCount: 2, masteredCount: 0 },
+      { lineId: b.id, userMoveCount: 2, masteredCount: 0 },
+    ]);
   });
 });

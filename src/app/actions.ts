@@ -94,6 +94,10 @@ export async function getDrillSummaryAction() {
   return getTrainerService().getDrillSummary();
 }
 
+export async function getLineMasteryAction() {
+  return getTrainerService().getLineMastery();
+}
+
 export async function saveGameAction(input: SaveGameInput) {
   return getTrainerService().saveGame(input);
 }

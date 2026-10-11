@@ -4,7 +4,9 @@ import { getTrainerService } from "@/lib/trainer-service-server";
 export const dynamic = "force-dynamic";
 
 export default function DrillPage() {
-  const summary = getTrainerService().getDrillSummary();
+  const service = getTrainerService();
+  const summary = service.getDrillSummary();
+  const lineMastery = service.getLineMastery();
 
   return (
     <section>
@@ -17,7 +19,7 @@ export default function DrillPage() {
         ngày → Mastered), sai thì tụt về hộp 1. Mục Mastered rời vòng quay của
         Daily Review Queue.
       </p>
-      <DrillTrainer initialSummary={summary} />
+      <DrillTrainer initialSummary={summary} initialLineMastery={lineMastery} />
     </section>
   );
 }

@@ -217,6 +217,25 @@ export type DrillScheduleState = {
 
 export type DrillSummary = { due: number; mastered: number; learning: number };
 
+/**
+ * Mức thuộc của một Dòng khai cuộc (US-21) suy từ node con: line "Thuộc"
+ * khi TOÀN BỘ node user-move của nó đã Mastered (xem `isLineMastered`).
+ */
+export type LineMastery = {
+  lineId: number;
+  /** Tổng số node user-move trong line. */
+  userMoveCount: number;
+  /** Số node user-move đã Mastered. */
+  masteredCount: number;
+};
+
+/** Line "Thuộc": có ít nhất một node user-move và tất cả đã Mastered. */
+export function isLineMastered(mastery: LineMastery): boolean {
+  return (
+    mastery.userMoveCount > 0 && mastery.masteredCount === mastery.userMoveCount
+  );
+}
+
 export type { EndgameGoal, EndgameSource, EndgameUserColor };
 
 /**
@@ -449,6 +468,7 @@ export interface TrainerService {
   getDrillQueue(now?: Date): DrillItem[];
   answerDrillItem(nodeId: number, correct: boolean, now?: Date): DrillScheduleState;
   getDrillSummary(now?: Date): DrillSummary;
+  getLineMastery(): LineMastery[];
   seedEndgameCatalog(): number;
   exportBackup(): BackupFile;
   importBackup(data: unknown): Promise<{ imported: Record<string, number> }>;
@@ -987,6 +1007,35 @@ export function createTrainerService(dbPath: string): TrainerService {
         }
       }
       return { due, mastered, learning };
+    },
+    /**
+     * Mức thuộc từng line (US-21): đếm node user-move + node đã Mastered
+     * (LEFT JOIN drill_schedule, count trong JS — dữ liệu nhỏ với app local).
+     * Trả về một entry cho mỗi line có node; xếp theo lineId như listLines.
+     */
+    getLineMastery(): LineMastery[] {
+      const rows = db
+        .select({
+          lineId: lineMoves.lineId,
+          isUserMove: lineMoves.isUserMove,
+          masteredAt: drillSchedule.masteredAt,
+        })
+        .from(lineMoves)
+        .leftJoin(drillSchedule, eq(drillSchedule.nodeId, lineMoves.id))
+        .orderBy(asc(lineMoves.lineId))
+        .all();
+      const byLine = new Map<number, LineMastery>();
+      for (const row of rows) {
+        const entry =
+          byLine.get(row.lineId) ??
+          { lineId: row.lineId, userMoveCount: 0, masteredCount: 0 };
+        if (row.isUserMove) {
+          entry.userMoveCount += 1;
+          if (row.masteredAt !== null) entry.masteredCount += 1;
+        }
+        byLine.set(row.lineId, entry);
+      }
+      return [...byLine.values()];
     },
     /**
      * Nạp catalog Thế tàn cuộc kinh điển (TT-10). Idempotent theo `name`:

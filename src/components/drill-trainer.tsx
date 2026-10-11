@@ -8,8 +8,15 @@ import {
   answerDrillItemAction,
   getDrillQueueAction,
   getDrillSummaryAction,
+  getLineMasteryAction,
 } from "@/app/actions";
-import type { DrillItem, DrillSummary, LineNode } from "@/lib/trainer-service";
+import type {
+  DrillItem,
+  DrillSummary,
+  LineMastery,
+  LineNode,
+} from "@/lib/trainer-service";
+import { isLineMastered } from "@/lib/trainer-service";
 
 type Phase = "idle" | "running" | "done";
 
@@ -43,9 +50,16 @@ function parentNodeOf(item: DrillItem): LineNode {
   return findNode(item.lineTree, item.parentNodeId) ?? item.lineTree;
 }
 
-export function DrillTrainer({ initialSummary }: { initialSummary: DrillSummary }) {
+export function DrillTrainer({
+  initialSummary,
+  initialLineMastery,
+}: {
+  initialSummary: DrillSummary;
+  initialLineMastery: LineMastery[];
+}) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [summary, setSummary] = useState<DrillSummary>(initialSummary);
+  const [lineMastery, setLineMastery] = useState<LineMastery[]>(initialLineMastery);
   const [queue, setQueue] = useState<DrillItem[]>([]);
   const [index, setIndex] = useState(0);
   const indexRef = useRef(0);
@@ -96,7 +110,12 @@ export function DrillTrainer({ initialSummary }: { initialSummary: DrillSummary 
     setChain(null);
     setPhase("done");
     startTransition(async () => {
-      setSummary(await getDrillSummaryAction());
+      const [nextSummary, nextMastery] = await Promise.all([
+        getDrillSummaryAction(),
+        getLineMasteryAction(),
+      ]);
+      setSummary(nextSummary);
+      setLineMastery(nextMastery);
     });
   };
 
@@ -229,7 +248,16 @@ export function DrillTrainer({ initialSummary }: { initialSummary: DrillSummary 
               <span className="text-stone-500">Thuộc (Mastered):</span>{" "}
               <span className="font-semibold text-emerald-700">{summary.mastered}</span>
             </span>
+            <span>
+              <span className="text-stone-500">Line đã thuộc:</span>{" "}
+              <span className="font-semibold text-emerald-700">
+                {lineMastery.filter(isLineMastered).length}/{lineMastery.length}
+              </span>
+            </span>
           </div>
+          <p className="mt-2 text-xs text-stone-400">
+            Line “Thuộc” khi toàn bộ nước repertoire của nó đã Mastered.
+          </p>
           <button
             type="button"
             onClick={startSession}
