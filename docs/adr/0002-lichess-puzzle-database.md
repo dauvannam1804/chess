@@ -4,6 +4,6 @@ Toàn bộ Puzzle của app lấy từ [database puzzle chính thức của Lich
 
 ## Consequences
 
-- **Giấy phép CC-BY-SA-3.0**: app phải ghi rõ nguồn (Lichess puzzle database) ở nơi hiển thị puzzle và trong về app; nếu phân phối lại nội dung phái sinh thì phải cùng giấy phép share-alike.
-- Dữ liệu là dump tĩnh: cập nhật puzzle mới = tải dump mới và import lại; app không phụ thuộc runtime API của Lichess.
+- **Giấy phép CC0** (đã verify trên database.lichess.org, 10/2026): không bắt buộc pháp lý về attribution hay share-alike; app vẫn ghi nguồn Lichess nơi hiển thị puzzle + trang về app như một lựa chọn sản phẩm (US-9), không phải nghĩa vụ giấy phép.
+- Dữ liệu là dump tĩnh: cập nhật puzzle mới = tải dump mới (`.zst`, ~293 MiB) và import lại; app không phụ thuộc runtime API của Lichess. Dump hiện 11 cột: `PuzzleId,FEN,Moves,Rating,RatingDeviation,Popularity,NbPlays,Themes,GameUrl,OpeningTags,DailyDate` — parser phải chấp nhận cả bản 10 cột cũ.
 - Schema import phải giữ được `Themes`, `Rating`, và `GameUrl` (để ghi nguồn từng puzzle).
