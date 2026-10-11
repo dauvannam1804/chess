@@ -64,11 +64,18 @@ export function Playground() {
     targetSquare: string | null;
   }) => {
     if (!targetSquare) return false;
-    const move = gameRef.current.move({
-      from: sourceSquare,
-      to: targetSquare,
-      promotion: "q",
-    });
+    // chess.js 1.x quăng exception với nước bất hợp lệ — chặn để bàn cờ
+    // trả quân về chỗ cũ (callback trả false) thay vì làm vỡ UI.
+    let move;
+    try {
+      move = gameRef.current.move({
+        from: sourceSquare,
+        to: targetSquare,
+        promotion: "q",
+      });
+    } catch {
+      move = null;
+    }
     if (move === null) {
       showError(
         "Nước đi không hợp lệ — bàn cờ từ chối nước này, quân cờ trở về chỗ cũ.",
