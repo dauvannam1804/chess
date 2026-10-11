@@ -7,6 +7,7 @@ import { Chessboard } from "react-chessboard";
 import { addBranchAndMoveAction, exportLinePgnAction } from "@/app/actions";
 import { AnnotationPanel } from "@/components/annotation-panel";
 import { EngineAnalysisPanel } from "@/components/engine-analysis-panel";
+import { nagLabel } from "@/lib/nag";
 import type { LineNode, RepertoireLine } from "@/lib/trainer-service";
 
 function findNode(node: LineNode, id: number | null): LineNode | null {
@@ -37,19 +38,6 @@ function moveLabel(node: LineNode): string {
   const mover = turn === "w" ? "b" : "w";
   const number = mover === "w" ? fullmove : fullmove - 1;
   return mover === "w" ? `${number}.` : `${number}...`;
-}
-
-const NAG_SYMBOLS: Record<number, string> = {
-  1: "!",
-  2: "?",
-  3: "!!",
-  4: "?!",
-  5: "!?",
-  6: "!!",
-};
-
-function nagLabel(nags: number[]): string {
-  return nags.map((nag) => NAG_SYMBOLS[nag] ?? `$${nag}`).join("");
 }
 
 function MoveTreeNode({

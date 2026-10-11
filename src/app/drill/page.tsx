@@ -11,7 +11,7 @@ export default function DrillPage() {
   return (
     <section>
       <h1 className="text-2xl font-bold">
-        Ôn tập khai cuộc <span className="text-stone-400">(Opening Drill)</span>
+        Ôn tập khai cuộc <span className="text-stone-400">(Drill khai cuộc)</span>
       </h1>
       <p className="mt-2 max-w-prose text-stone-600">
         Drill chủ động: app đưa thế cờ trải đều qua các Dòng khai cuộc và nhánh
